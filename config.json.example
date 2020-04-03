@@ -1,0 +1,14 @@
+{
+  "chainquery": {
+    "host": "chainquery.lbry.com",
+    "user": "user",
+    "database": "chainquery",
+    "password": "password"
+  },
+  "reflector": {
+    "host": "host",
+    "user": "lbry",
+    "database": "reflector_blobs",
+    "password": "password"
+  }
+}
