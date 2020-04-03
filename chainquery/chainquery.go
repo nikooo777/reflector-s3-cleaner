@@ -3,12 +3,15 @@ package chainquery
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"time"
 
 	"reflector-s3-cleaner/configs"
 	"reflector-s3-cleaner/shared"
 
 	"github.com/lbryio/lbry.go/v2/extras/errors"
+	"github.com/lbryio/lbry.go/v2/extras/query"
+	"github.com/sirupsen/logrus"
 
 	_ "github.com/go-sql-driver/mysql"
 	"gopkg.in/nullbio/null.v6"
@@ -126,4 +129,48 @@ func (c *CQApi) ClaimExists(sdHash string) (bool, error) {
 		return c > 0, nil
 	}
 	return false, nil
+}
+
+func (c *CQApi) BatchedClaimsExist(sdHashes []string) (map[string]bool, error) {
+	args := make([]interface{}, len(sdHashes))
+	for i, sd := range sdHashes {
+		args[i] = sd
+	}
+	batches := int(math.Ceil(float64(len(args)) / float64(shared.MysqlMaxBatchSize)))
+	existingHashes := make(map[string]bool, len(args))
+	for i := 0; i < batches; i++ {
+		ceiling := len(args)
+		if (i+1)*shared.MysqlMaxBatchSize < ceiling {
+			ceiling = (i + 1) * shared.MysqlMaxBatchSize
+		}
+		logrus.Printf("checking for existing hashes. Batch %d of %d", i+1, batches)
+		err := c.batchedClaimsExist(args[i*shared.MysqlMaxBatchSize:ceiling], existingHashes)
+		if err != nil {
+			return nil, errors.Err(err)
+		}
+	}
+	for _, hash := range sdHashes {
+		_, ok := existingHashes[hash]
+		if !ok {
+			existingHashes[hash] = false
+		}
+	}
+	return existingHashes, nil
+}
+
+func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[string]bool) error {
+	rows, err := c.dbConn.Query(`SELECT sd_hash FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
+	if err != nil {
+		return errors.Err(err)
+	}
+	defer shared.CloseRows(rows)
+	for rows.Next() {
+		var h string
+		err = rows.Scan(&h)
+		if err != nil {
+			return errors.Err(err)
+		}
+		existingHashes[h] = true
+	}
+	return nil
 }
