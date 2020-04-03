@@ -95,7 +95,7 @@ func (c *ReflectorApi) getStreams(offset int64) ([]int64, int64, error) {
 	}
 	defer shared.CloseRows(rows)
 	ids := make([]int64, 0, batchSize)
-	var newOffset int64
+	newOffset := offset
 	for rows.Next() {
 		var id int64
 		var blobID int64
