@@ -9,6 +9,7 @@ import (
 
 	"github.com/lbryio/lbry.go/v2/extras/errors"
 	"github.com/lbryio/lbry.go/v2/extras/query"
+	"github.com/sirupsen/logrus"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -71,6 +72,7 @@ func (c *ReflectorApi) GetStreams(limit int64) ([]int64, error) {
 	var curPos int64
 	allIDs := make([]int64, 0, 10000000)
 	for {
+		logrus.Printf("getting ids... cur pos: %d (%d fetched)", curPos, len(allIDs))
 		ids, newOffset, err := c.getStreams(curPos)
 		if err != nil {
 			return nil, errors.Err(err)
