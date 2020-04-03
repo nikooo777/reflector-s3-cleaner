@@ -62,5 +62,5 @@ func main() {
 			existing++
 		}
 	}
-	logrus.Printf("%d existing and %d not on the blockchain (%.1f missing)", existing, inexisting, float64(inexisting)/float64(existing))
+	logrus.Printf("%d existing and %d not on the blockchain (%.1f missing)", existing, inexisting, (float64(inexisting)/float64(existing))*100)
 }
