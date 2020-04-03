@@ -23,7 +23,7 @@ func Init() error {
 		return nil
 	}
 	c := Configs{}
-	err := gonfig.GetConf("../config.json", &c)
+	err := gonfig.GetConf("./config.json", &c)
 	if err != nil {
 		return errors.Err(err)
 	}
