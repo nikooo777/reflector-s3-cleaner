@@ -71,13 +71,23 @@ const batchSize = 10000
 func (c *ReflectorApi) GetStreams(limit int64) ([]int64, error) {
 	var curPos int64
 	allIDs := make([]int64, 0, 10000000)
+	stallCount := 0
 	for {
 		logrus.Printf("getting ids... cur pos: %d (%d fetched)", curPos, len(allIDs))
 		ids, newOffset, err := c.getStreams(curPos)
 		if err != nil {
 			return nil, errors.Err(err)
 		}
-		curPos = newOffset
+		if newOffset == curPos {
+			curPos += batchSize
+			stallCount++
+			if stallCount == 1000 {
+				break
+			}
+		} else {
+			stallCount = 0
+			curPos = newOffset
+		}
 		allIDs = append(allIDs, ids...)
 		if int64(len(allIDs)) >= limit {
 			break
