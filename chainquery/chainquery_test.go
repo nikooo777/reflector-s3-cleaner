@@ -1,6 +1,7 @@
 package chainquery
 
 import (
+	"reflect"
 	"testing"
 
 	"reflector-s3-cleaner/configs"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestCQApi_GetClaimFromSDHash(t *testing.T) {
-	err := configs.Init()
+	err := configs.Init("../config.json")
 	assert.NoError(t, err)
 
 	cq, err := Init()
@@ -25,7 +26,7 @@ func TestCQApi_GetClaimFromSDHash(t *testing.T) {
 }
 
 func TestCQApi_ClaimExists(t *testing.T) {
-	err := configs.Init()
+	err := configs.Init("../config.json")
 	assert.NoError(t, err)
 
 	cq, err := Init()
@@ -38,4 +39,27 @@ func TestCQApi_ClaimExists(t *testing.T) {
 	c, err = cq.ClaimExists("sdsds")
 	assert.NoError(t, err)
 	assert.False(t, c)
+}
+
+func TestCQApi_BatchedClaimsExist(t *testing.T) {
+	err := configs.Init("../config.json")
+	assert.NoError(t, err)
+
+	cq, err := Init()
+	assert.NoError(t, err)
+	assert.NotNil(t, cq)
+
+	hashesToResolve := []string{
+		"8ca439c2ca48512b5188bde83c631475b4727763fcd11933d0f3d62defdd35808c9d502766a6c088d4dff6e48d0335b5",
+		"98733467bf2e247d9c28f090bebfb68af6f3982a8169e689fa7e053902e6b1bdb2de040e29fd764d65221def3a80666c",
+		"398504b5e6c65019cba01edf03fc9c2ad02606a80e76035e04fb5ec08ced6b5d8245484970bb51a06a787747030f3b7b",
+	}
+	expectedResults := map[string]bool{
+		"8ca439c2ca48512b5188bde83c631475b4727763fcd11933d0f3d62defdd35808c9d502766a6c088d4dff6e48d0335b5": true,
+		"98733467bf2e247d9c28f090bebfb68af6f3982a8169e689fa7e053902e6b1bdb2de040e29fd764d65221def3a80666c": true,
+		"398504b5e6c65019cba01edf03fc9c2ad02606a80e76035e04fb5ec08ced6b5d8245484970bb51a06a787747030f3b7b": false,
+	}
+	res, err := cq.BatchedClaimsExist(hashesToResolve)
+	assert.NoError(t, err)
+	assert.True(t, reflect.DeepEqual(expectedResults, res))
 }

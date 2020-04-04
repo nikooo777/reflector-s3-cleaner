@@ -47,7 +47,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 	if load == save == true {
 		panic("You can't use --load and --save at the same time")
 	}
-	err := configs.Init()
+	err := configs.Init("./config.json")
 	if err != nil {
 		panic(err)
 	}

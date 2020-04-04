@@ -18,12 +18,12 @@ type Configs struct {
 
 var Configuration *Configs
 
-func Init() error {
+func Init(configPath string) error {
 	if Configuration != nil {
 		return nil
 	}
 	c := Configs{}
-	err := gonfig.GetConf("./config.json", &c)
+	err := gonfig.GetConf(configPath, &c)
 	if err != nil {
 		return errors.Err(err)
 	}
