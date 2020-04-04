@@ -80,7 +80,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 			panic(err)
 		}
 
-		sdHashes, err := getHashesByIds(ids, rf)
+		sdHashes, err = getHashesByIds(ids, rf)
 		if err != nil {
 			panic(err)
 		}
