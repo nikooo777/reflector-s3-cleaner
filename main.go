@@ -18,8 +18,10 @@ var (
 	sdHashesPath         string
 	existingHashesPath   string
 	unresolvedHashesPath string
-	load                 bool
-	save                 bool
+	loadReflectorData    bool
+	loadChainqueryData   bool
+	saveReflectorData    bool
+	saveChainqueryData   bool
 	limit                int64
 )
 
@@ -33,8 +35,10 @@ func main() {
 	cmd.Flags().StringVar(&sdHashesPath, "sd_hashes", "sd_hashes.json", "path of sd_hashes")
 	cmd.Flags().StringVar(&existingHashesPath, "existing_hashes", "existing_sd_hashes.json", "path of sd_hashes that exist on chain")
 	cmd.Flags().StringVar(&unresolvedHashesPath, "unresolved_hashes", "unresolved_sd_hashes.json", "path of sd_hashes that don't exist on chain")
-	cmd.Flags().BoolVar(&load, "load", false, "load results from file instead of querying the database unnecessarily")
-	cmd.Flags().BoolVar(&save, "save", false, "save results to file once loaded from the database")
+	cmd.Flags().BoolVar(&loadReflectorData, "load-reflector-data", false, "load results from file instead of querying the reflector database unnecessarily")
+	cmd.Flags().BoolVar(&loadChainqueryData, "load-chainquery-data", false, "load results from file instead of querying the chainquery database unnecessarily")
+	cmd.Flags().BoolVar(&saveReflectorData, "save-reflector-data", false, "save results to file once loaded from the reflector database")
+	cmd.Flags().BoolVar(&saveChainqueryData, "save-chainquery-data", false, "save results to file once loaded from the chainquery database")
 	cmd.Flags().Int64Var(&limit, "limit", 50000000, "how many streams to check (approx)")
 
 	if err := cmd.Execute(); err != nil {
@@ -44,7 +48,7 @@ func main() {
 }
 
 func cleaner(cmd *cobra.Command, args []string) {
-	if load == save == true {
+	if loadReflectorData == saveReflectorData == true {
 		panic("You can't use --load and --save at the same time")
 	}
 	err := configs.Init("./config.json")
@@ -62,7 +66,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 	}
 
 	var sdHashes []string
-	if load {
+	if loadReflectorData {
 		sdHashes, err = reflector.LoadSDHashes(sdHashesPath)
 		if err != nil {
 			panic(err)
@@ -77,7 +81,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		if err != nil {
 			panic(err)
 		}
-		if save {
+		if saveReflectorData {
 			err = reflector.SaveSDHashes(sdHashes, sdHashesPath)
 			if err != nil {
 				panic(err)
@@ -85,18 +89,41 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	streamExists, err := cq.BatchedClaimsExist(sdHashes)
-	if err != nil {
-		panic(err)
-	}
+	var unresolvedHashes []string
+	var existingHashes []string
+	if loadChainqueryData {
+		existingHashes, err = chainquery.LoadResolvedHashes(existingHashesPath)
+		if err != nil {
+			panic(err)
+		}
+		unresolvedHashes, err = chainquery.LoadResolvedHashes(unresolvedHashesPath)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		streamExists, err := cq.BatchedClaimsExist(sdHashes)
+		if err != nil {
+			panic(err)
+		}
 
-	unresolvedHashes := make([]string, 0, len(sdHashes))
-	existingHashes := make([]string, 0, len(sdHashes))
-	for hash, exists := range streamExists {
-		if !exists {
-			unresolvedHashes = append(unresolvedHashes, hash)
-		} else {
-			existingHashes = append(existingHashes, hash)
+		unresolvedHashes = make([]string, 0, len(sdHashes))
+		existingHashes = make([]string, 0, len(sdHashes))
+		for hash, exists := range streamExists {
+			if !exists {
+				unresolvedHashes = append(unresolvedHashes, hash)
+			} else {
+				existingHashes = append(existingHashes, hash)
+			}
+		}
+		if saveChainqueryData {
+			err = chainquery.SaveHashes(unresolvedHashes, unresolvedHashesPath)
+			if err != nil {
+				panic(err)
+			}
+			err = chainquery.SaveHashes(existingHashes, existingHashesPath)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 
