@@ -1,0 +1,15 @@
+os: linux
+dist: bionic
+language: go
+go:
+  - 1.14.1
+
+install: true
+
+cache:
+  directories:
+    - $HOME/.cache/go-build
+    - $HOME/gopath/pkg/mod
+
+script:
+  - make
