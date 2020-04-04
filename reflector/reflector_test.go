@@ -5,7 +5,6 @@ import (
 
 	"reflector-s3-cleaner/configs"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,11 +19,6 @@ func TestReflectorApi_GetStreams(t *testing.T) {
 	streams, err := rf.GetStreams(1000)
 	assert.NoError(t, err)
 	assert.NotNil(t, streams)
-
-	for _, stream := range streams {
-		logrus.Println(stream)
-	}
-
 }
 
 func TestReflectorApi_GetSDblobHashes(t *testing.T) {

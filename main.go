@@ -49,7 +49,10 @@ func main() {
 
 func cleaner(cmd *cobra.Command, args []string) {
 	if loadReflectorData == saveReflectorData == true {
-		panic("You can't use --load and --save at the same time")
+		panic("You can't use --load-reflector-data and --save-reflector-data at the same time")
+	}
+	if loadChainqueryData == saveChainqueryData == true {
+		panic("You can't use --load-chainquery-data and --save-chainquery-data at the same time")
 	}
 	err := configs.Init("./config.json")
 	if err != nil {
@@ -127,7 +130,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	logrus.Printf("%d existing and %d not on the blockchain (%.1f missing)", len(existingHashes),
+	logrus.Printf("%d existing and %d not on the blockchain (%.3f missing)", len(existingHashes),
 		len(unresolvedHashes), (float64(len(unresolvedHashes))/float64(len(existingHashes)))*100)
 }
 
