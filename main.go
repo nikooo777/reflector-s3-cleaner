@@ -22,6 +22,8 @@ var (
 	loadChainqueryData   bool
 	saveReflectorData    bool
 	saveChainqueryData   bool
+	checkExpired         bool
+	checkSpent           bool
 	limit                int64
 )
 
@@ -39,6 +41,8 @@ func main() {
 	cmd.Flags().BoolVar(&loadChainqueryData, "load-chainquery-data", false, "load results from file instead of querying the chainquery database unnecessarily")
 	cmd.Flags().BoolVar(&saveReflectorData, "save-reflector-data", false, "save results to file once loaded from the reflector database")
 	cmd.Flags().BoolVar(&saveChainqueryData, "save-chainquery-data", false, "save results to file once loaded from the chainquery database")
+	cmd.Flags().BoolVar(&checkExpired, "check-expired", true, "check for streams referenced by an expired claim")
+	cmd.Flags().BoolVar(&checkSpent, "check-spent", true, "check for streams referenced by a spent claim")
 	cmd.Flags().Int64Var(&limit, "limit", 50000000, "how many streams to check (approx)")
 
 	if err := cmd.Execute(); err != nil {
@@ -104,7 +108,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 			panic(err)
 		}
 	} else {
-		streamExists, err := cq.BatchedClaimsExist(sdHashes)
+		streamExists, err := cq.BatchedClaimsExist(sdHashes, checkExpired, checkSpent)
 		if err != nil {
 			panic(err)
 		}

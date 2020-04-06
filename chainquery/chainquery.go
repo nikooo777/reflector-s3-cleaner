@@ -131,7 +131,7 @@ func (c *CQApi) ClaimExists(sdHash string) (bool, error) {
 	return false, nil
 }
 
-func (c *CQApi) BatchedClaimsExist(sdHashes []string) (map[string]bool, error) {
+func (c *CQApi) BatchedClaimsExist(sdHashes []string, checkExpired bool, checkSpent bool) (map[string]bool, error) {
 	args := make([]interface{}, len(sdHashes))
 	for i, sd := range sdHashes {
 		args[i] = sd
@@ -144,7 +144,7 @@ func (c *CQApi) BatchedClaimsExist(sdHashes []string) (map[string]bool, error) {
 			ceiling = (i + 1) * shared.MysqlMaxBatchSize
 		}
 		logrus.Printf("checking for existing hashes. Batch %d of %d", i+1, batches)
-		err := c.batchedClaimsExist(args[i*shared.MysqlMaxBatchSize:ceiling], existingHashes)
+		err := c.batchedClaimsExist(args[i*shared.MysqlMaxBatchSize:ceiling], existingHashes, checkExpired, checkSpent)
 		if err != nil {
 			return nil, errors.Err(err)
 		}
@@ -158,19 +158,26 @@ func (c *CQApi) BatchedClaimsExist(sdHashes []string) (map[string]bool, error) {
 	return existingHashes, nil
 }
 
-func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[string]bool) error {
-	rows, err := c.dbConn.Query(`SELECT sd_hash FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
+func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[string]bool, checkExpired bool, checkSpent bool) error {
+	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
 	if err != nil {
 		return errors.Err(err)
 	}
 	defer shared.CloseRows(rows)
 	for rows.Next() {
 		var h string
-		err = rows.Scan(&h)
+		var bidState string
+		err = rows.Scan(&h, &bidState)
 		if err != nil {
 			return errors.Err(err)
 		}
 		existingHashes[h] = true
+		if checkExpired && bidState == "Expired" {
+			existingHashes[h] = false
+		}
+		if checkSpent && bidState == "Spent" {
+			existingHashes[h] = false
+		}
 	}
 	return nil
 }
