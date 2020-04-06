@@ -65,16 +65,16 @@ func (c *ReflectorApi) GetSDblobHashes(blobsIDs []int64) (map[int64]string, erro
 
 const batchSize = 10000
 
-// GetStreams returns a slice of indexes referencing sdBlobs
+// GetStreams returns a slice of StreamData containing all necessary stream information
 // limit is an indicator for the function for when to stop looking for new IDs
 // it's not guaranteed that the amount of returned IDs matches the limit
-func (c *ReflectorApi) GetStreams(limit int64) ([]int64, error) {
+func (c *ReflectorApi) GetStreams(limit int64) ([]shared.StreamData, error) {
 	var curPos int64
-	allIDs := make([]int64, 0, limit)
+	allStreamData := make([]shared.StreamData, 0, limit)
 	stallCount := 0
 	for {
-		logrus.Printf("getting ids... cur pos: %d (%d fetched)", curPos, len(allIDs))
-		ids, newOffset, err := c.getStreams(curPos)
+		logrus.Printf("getting ids... cur pos: %d (%d fetched)", curPos, len(allStreamData))
+		streamData, newOffset, err := c.getStreamData(limit, curPos)
 		if err != nil {
 			return nil, errors.Err(err)
 		}
@@ -88,35 +88,61 @@ func (c *ReflectorApi) GetStreams(limit int64) ([]int64, error) {
 			stallCount = 0
 			curPos = newOffset
 		}
-		allIDs = append(allIDs, ids...)
-		if int64(len(allIDs)) >= limit {
+		allStreamData = append(allStreamData, streamData...)
+		if int64(len(allStreamData)) >= limit {
 			break
 		}
 	}
 
-	return allIDs, nil
+	return allStreamData, nil
 }
 
-// getStreams returns a slice of indexes referencing sdBlobs and an offset for the subsequent call which should be passed in as offset
-func (c *ReflectorApi) getStreams(offset int64) ([]int64, int64, error) {
-	rows, err := c.dbConn.Query(`SELECT id, sd_blob_id FROM stream WHERE id > ? and id < ? order by id desc`, offset, offset+batchSize)
+// getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
+func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.StreamData, int64, error) {
+	upperLimit := offset + batchSize //+ int64(math.Min(float64(limit), float64(batchSize)))
+	rows, err := c.dbConn.Query(`SELECT s.id, s.sd_blob_id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id asc limit ?`, offset, upperLimit, limit)
 	if err != nil {
 		return nil, offset, errors.Err(err)
 	}
 	defer shared.CloseRows(rows)
-	ids := make([]int64, 0, batchSize)
+	streamData := make([]shared.StreamData, 0, batchSize)
 	newOffset := offset
 	for rows.Next() {
-		var id int64
+		var streamID int64
 		var blobID int64
-		err = rows.Scan(&id, &blobID)
+		var sdHash string
+		err = rows.Scan(&streamID, &blobID, &sdHash)
 		if err != nil {
 			return nil, 0, errors.Err(err)
 		}
-		ids = append(ids, blobID)
-		if id > newOffset {
-			newOffset = id
+		streamData = append(streamData, shared.StreamData{
+			SdHash:   sdHash,
+			StreamID: streamID,
+			SdBlobID: blobID,
+		})
+		if streamID > newOffset {
+			newOffset = streamID
 		}
 	}
-	return ids, newOffset, nil
+	return streamData, newOffset, nil
+}
+
+// getStreams returns a slice of indexes referencing sdBlobs and an offset for the subsequent call which should be passed in as offset
+func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (map[string]int64, error) {
+	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, sdBlobID)
+	if err != nil {
+		return nil, errors.Err(err)
+	}
+	defer shared.CloseRows(rows)
+	streamBlobs := make(map[string]int64, 50)
+	for rows.Next() {
+		var id int64
+		var hash string
+		err = rows.Scan(&id, &hash)
+		if err != nil {
+			return nil, errors.Err(err)
+		}
+		streamBlobs[hash] = id
+	}
+	return streamBlobs, nil
 }

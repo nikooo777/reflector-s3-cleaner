@@ -14,3 +14,9 @@ func CloseRows(rows *sql.Rows) {
 		logrus.Errorln(err.Error())
 	}
 }
+
+type StreamData struct {
+	SdHash   string `json:"sd_hash"`
+	StreamID int64  `json:"stream_id"`
+	SdBlobID int64  `json:"sd_blob_id"`
+}

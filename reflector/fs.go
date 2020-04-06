@@ -4,14 +4,16 @@ import (
 	"encoding/json"
 	"io/ioutil"
 
+	"reflector-s3-cleaner/shared"
+
 	"github.com/lbryio/lbry.go/v2/extras/errors"
 
 	"github.com/sirupsen/logrus"
 )
 
-func SaveSDHashes(sdHashes []string, path string) error {
-	logrus.Printf("saving %d hashes to %s", len(sdHashes), path)
-	file, err := json.MarshalIndent(sdHashes, "", "")
+func SaveStreamData(streamData []shared.StreamData, path string) error {
+	logrus.Printf("saving %d stream data objects to %s", len(streamData), path)
+	file, err := json.MarshalIndent(streamData, "", "")
 	if err != nil {
 		return errors.Err(err)
 	}
@@ -23,17 +25,17 @@ func SaveSDHashes(sdHashes []string, path string) error {
 	return nil
 }
 
-func LoadSDHashes(path string) ([]string, error) {
+func LoadStreamData(path string) ([]shared.StreamData, error) {
 	logrus.Printf("loading hashes from %s", path)
 	file, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
-	var sdHashes []string
-	err = json.Unmarshal(file, &sdHashes)
+	var streamData []shared.StreamData
+	err = json.Unmarshal(file, &streamData)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
-	logrus.Printf("loaded %d hashes from %s", len(sdHashes), path)
-	return sdHashes, nil
+	logrus.Printf("loaded %d stream data objects from %s", len(streamData), path)
+	return streamData, nil
 }

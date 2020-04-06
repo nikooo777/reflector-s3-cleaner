@@ -131,10 +131,10 @@ func (c *CQApi) ClaimExists(sdHash string) (bool, error) {
 	return false, nil
 }
 
-func (c *CQApi) BatchedClaimsExist(sdHashes []string, checkExpired bool, checkSpent bool) (map[string]bool, error) {
-	args := make([]interface{}, len(sdHashes))
-	for i, sd := range sdHashes {
-		args[i] = sd
+func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) (map[string]bool, error) {
+	args := make([]interface{}, len(streamData))
+	for i, sd := range streamData {
+		args[i] = sd.SdHash
 	}
 	batches := int(math.Ceil(float64(len(args)) / float64(shared.MysqlMaxBatchSize)))
 	existingHashes := make(map[string]bool, len(args))
@@ -149,10 +149,10 @@ func (c *CQApi) BatchedClaimsExist(sdHashes []string, checkExpired bool, checkSp
 			return nil, errors.Err(err)
 		}
 	}
-	for _, hash := range sdHashes {
-		_, ok := existingHashes[hash]
+	for _, sd := range streamData {
+		_, ok := existingHashes[sd.SdHash]
 		if !ok {
-			existingHashes[hash] = false
+			existingHashes[sd.SdHash] = false
 		}
 	}
 	return existingHashes, nil

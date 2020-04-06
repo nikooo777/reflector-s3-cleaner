@@ -27,20 +27,5 @@ func TestSaveAndLoadSDHashes(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, loadedUnresolvedHashes)
 	assert.Len(t, loadedUnresolvedHashes, 3)
-	assert.True(t, slicesMatch(unresolvedHashes, loadedUnresolvedHashes))
-}
-
-func slicesMatch(original, observed []string) bool {
-outer:
-	for _, h := range observed {
-		for _, expected := range original {
-			if h != expected {
-				continue
-			} else {
-				continue outer
-			}
-		}
-		return false
-	}
-	return true
+	assert.ElementsMatch(t, unresolvedHashes, loadedUnresolvedHashes)
 }

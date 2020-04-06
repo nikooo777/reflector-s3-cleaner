@@ -52,10 +52,10 @@ func main() {
 }
 
 func cleaner(cmd *cobra.Command, args []string) {
-	if loadReflectorData == saveReflectorData == true {
+	if loadReflectorData == saveReflectorData && saveReflectorData == true {
 		panic("You can't use --load-reflector-data and --save-reflector-data at the same time")
 	}
-	if loadChainqueryData == saveChainqueryData == true {
+	if loadChainqueryData == saveChainqueryData && saveChainqueryData == true {
 		panic("You can't use --load-chainquery-data and --save-chainquery-data at the same time")
 	}
 	err := configs.Init("./config.json")
@@ -72,24 +72,20 @@ func cleaner(cmd *cobra.Command, args []string) {
 		panic(err)
 	}
 
-	var sdHashes []string
+	var streamData []shared.StreamData
 	if loadReflectorData {
-		sdHashes, err = reflector.LoadSDHashes(sdHashesPath)
+		streamData, err = reflector.LoadStreamData(sdHashesPath)
 		if err != nil {
 			panic(err)
 		}
 	} else {
-		ids, err := rf.GetStreams(limit)
+		streamData, err = rf.GetStreams(limit)
 		if err != nil {
 			panic(err)
 		}
 
-		sdHashes, err = getHashesByIds(ids, rf)
-		if err != nil {
-			panic(err)
-		}
 		if saveReflectorData {
-			err = reflector.SaveSDHashes(sdHashes, sdHashesPath)
+			err = reflector.SaveStreamData(streamData, sdHashesPath)
 			if err != nil {
 				panic(err)
 			}
@@ -108,13 +104,13 @@ func cleaner(cmd *cobra.Command, args []string) {
 			panic(err)
 		}
 	} else {
-		streamExists, err := cq.BatchedClaimsExist(sdHashes, checkExpired, checkSpent)
+		streamExists, err := cq.BatchedClaimsExist(streamData, checkExpired, checkSpent)
 		if err != nil {
 			panic(err)
 		}
 
-		unresolvedHashes = make([]string, 0, len(sdHashes))
-		existingHashes = make([]string, 0, len(sdHashes))
+		unresolvedHashes = make([]string, 0, len(streamData))
+		existingHashes = make([]string, 0, len(streamData))
 		for hash, exists := range streamExists {
 			if !exists {
 				unresolvedHashes = append(unresolvedHashes, hash)
@@ -134,7 +130,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	logrus.Printf("%d existing and %d not on the blockchain (%.3f missing)", len(existingHashes),
+	logrus.Printf("%d existing and %d not on the blockchain (%.3f%% missing)", len(existingHashes),
 		len(unresolvedHashes), (float64(len(unresolvedHashes))/float64(len(existingHashes)))*100)
 }
 
