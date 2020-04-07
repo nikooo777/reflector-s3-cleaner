@@ -17,6 +17,7 @@ var (
 	sdHashesPath         string
 	existingHashesPath   string
 	unresolvedHashesPath string
+	streamBlobsPath      string
 	loadReflectorData    bool
 	loadChainqueryData   bool
 	saveReflectorData    bool
@@ -37,6 +38,7 @@ func main() {
 	cmd.Flags().StringVar(&sdHashesPath, "sd_hashes", "sd_hashes.json", "path of sd_hashes")
 	cmd.Flags().StringVar(&existingHashesPath, "existing_hashes", "existing_sd_hashes.json", "path of sd_hashes that exist on chain")
 	cmd.Flags().StringVar(&unresolvedHashesPath, "unresolved_hashes", "unresolved_sd_hashes.json", "path of sd_hashes that don't exist on chain")
+	cmd.Flags().StringVar(&streamBlobsPath, "stream-blobs", "blobs_to_delete.json", "path of blobs set to delete")
 	cmd.Flags().BoolVar(&loadReflectorData, "load-reflector-data", false, "load results from file instead of querying the reflector database unnecessarily")
 	cmd.Flags().BoolVar(&loadChainqueryData, "load-chainquery-data", false, "load results from file instead of querying the chainquery database unnecessarily")
 	cmd.Flags().BoolVar(&saveReflectorData, "save-reflector-data", false, "save results to file once loaded from the reflector database")
@@ -131,12 +133,22 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 	if resolveBlobs {
+		blobsToDelete := make([]reflector.StreamBlobs, len(streamData))
+		totalBlobs := 0
 		for _, streamData := range invalidStreams {
 			blobs, err := rf.GetBlobHashesForStream(streamData.StreamID)
 			if err != nil {
 				panic(err)
 			}
-			logrus.Printf("found %d blobs for stream %s", len(blobs.BlobHashes), streamData.SdHash)
+			if blobs != nil {
+				blobsToDelete = append(blobsToDelete, *blobs)
+				totalBlobs += len(blobs.BlobIds)
+			}
+			logrus.Printf("found %d blobs for stream %s (%d total)", len(blobs.BlobHashes), streamData.SdHash, totalBlobs)
+		}
+		err = reflector.SaveBlobs(blobsToDelete, streamBlobsPath)
+		if err != nil {
+			panic(err)
 		}
 	}
 
