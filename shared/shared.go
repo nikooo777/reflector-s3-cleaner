@@ -19,4 +19,7 @@ type StreamData struct {
 	SdHash   string `json:"sd_hash"`
 	StreamID int64  `json:"stream_id"`
 	SdBlobID int64  `json:"sd_blob_id"`
+	Exists   bool   `json:"exists"`
+	Expired  bool   `json:"expired"`
+	Spent    bool   `json:"spent"`
 }

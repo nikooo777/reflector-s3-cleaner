@@ -4,12 +4,22 @@ import (
 	"os"
 	"testing"
 
+	"reflector-s3-cleaner/shared"
+
 	"github.com/stretchr/testify/assert"
 )
 
 func TestSaveAndLoadSDHashes(t *testing.T) {
-	existingHashes := []string{"test1", "test2", "test3"}
-	unresolvedHashes := []string{"test4", "test5", "test6"}
+	existingHashes := []shared.StreamData{
+		{"test1", 0, 0, true, false, false},
+		{"test2", 0, 0, true, false, false},
+		{"test3", 0, 0, true, false, false},
+	}
+	unresolvedHashes := []shared.StreamData{
+		{"test4", 0, 0, false, false, false},
+		{"test5", 0, 0, true, true, false},
+		{"test6", 0, 0, true, false, true},
+	}
 	err := SaveHashes(existingHashes, "existing_sd_hashes.json")
 	assert.NoError(t, err)
 	defer os.Remove("existing_sd_hashes.json")
@@ -21,7 +31,7 @@ func TestSaveAndLoadSDHashes(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, loadedExistingHashes)
 	assert.Len(t, loadedExistingHashes, 3)
-	assert.True(t, slicesMatch(existingHashes, loadedExistingHashes))
+	assert.ElementsMatch(t, existingHashes, loadedExistingHashes)
 
 	loadedUnresolvedHashes, err := LoadResolvedHashes("unresolved_sd_hashes.json")
 	assert.NoError(t, err)

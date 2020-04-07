@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"os"
 
 	"reflector-s3-cleaner/chainquery"
@@ -24,6 +23,7 @@ var (
 	saveChainqueryData   bool
 	checkExpired         bool
 	checkSpent           bool
+	resolveBlobs         bool
 	limit                int64
 )
 
@@ -43,6 +43,7 @@ func main() {
 	cmd.Flags().BoolVar(&saveChainqueryData, "save-chainquery-data", false, "save results to file once loaded from the chainquery database")
 	cmd.Flags().BoolVar(&checkExpired, "check-expired", true, "check for streams referenced by an expired claim")
 	cmd.Flags().BoolVar(&checkSpent, "check-spent", true, "check for streams referenced by a spent claim")
+	cmd.Flags().BoolVar(&resolveBlobs, "resolve-blobs", false, "resolve the blobs for the invalid streams")
 	cmd.Flags().Int64Var(&limit, "limit", 50000000, "how many streams to check (approx)")
 
 	if err := cmd.Execute(); err != nil {
@@ -92,73 +93,53 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	var unresolvedHashes []string
-	var existingHashes []string
+	var invalidStreams []shared.StreamData
+	var validStreams []shared.StreamData
 	if loadChainqueryData {
-		existingHashes, err = chainquery.LoadResolvedHashes(existingHashesPath)
+		validStreams, err = chainquery.LoadResolvedHashes(existingHashesPath)
 		if err != nil {
 			panic(err)
 		}
-		unresolvedHashes, err = chainquery.LoadResolvedHashes(unresolvedHashesPath)
+		invalidStreams, err = chainquery.LoadResolvedHashes(unresolvedHashesPath)
 		if err != nil {
 			panic(err)
 		}
 	} else {
-		streamExists, err := cq.BatchedClaimsExist(streamData, checkExpired, checkSpent)
+		err := cq.BatchedClaimsExist(streamData, checkExpired, checkSpent)
 		if err != nil {
 			panic(err)
 		}
 
-		unresolvedHashes = make([]string, 0, len(streamData))
-		existingHashes = make([]string, 0, len(streamData))
-		for hash, exists := range streamExists {
-			if !exists {
-				unresolvedHashes = append(unresolvedHashes, hash)
+		invalidStreams = make([]shared.StreamData, 0, len(streamData))
+		validStreams = make([]shared.StreamData, 0, len(streamData))
+		for _, stream := range streamData {
+			if !stream.Exists || (checkExpired && stream.Expired) || (checkSpent && stream.Spent) {
+				invalidStreams = append(invalidStreams, stream)
 			} else {
-				existingHashes = append(existingHashes, hash)
+				validStreams = append(validStreams, stream)
 			}
 		}
 		if saveChainqueryData {
-			err = chainquery.SaveHashes(unresolvedHashes, unresolvedHashesPath)
+			err = chainquery.SaveHashes(invalidStreams, unresolvedHashesPath)
 			if err != nil {
 				panic(err)
 			}
-			err = chainquery.SaveHashes(existingHashes, existingHashesPath)
+			err = chainquery.SaveHashes(validStreams, existingHashesPath)
 			if err != nil {
 				panic(err)
 			}
 		}
 	}
-
-	logrus.Printf("%d existing and %d not on the blockchain (%.3f%% missing)", len(existingHashes),
-		len(unresolvedHashes), (float64(len(unresolvedHashes))/float64(len(existingHashes)))*100)
-}
-
-func getHashesByIds(ids []int64, rf *reflector.ReflectorApi) ([]string, error) {
-	totIds := len(ids)
-	batches := int(math.Ceil(float64(totIds) / float64(shared.MysqlMaxBatchSize)))
-	hashes := make(map[int64]string, shared.MysqlMaxBatchSize*batches)
-	totalHashes := 0
-
-	for i := 0; i < batches; i++ {
-		ceiling := len(ids)
-		if (i+1)*shared.MysqlMaxBatchSize < ceiling {
-			ceiling = (i + 1) * shared.MysqlMaxBatchSize
-		}
-		logrus.Printf("getting hashes for batch %d of %d", i+1, batches)
-		h, err := rf.GetSDblobHashes(ids[i*shared.MysqlMaxBatchSize : ceiling])
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range h {
-			hashes[k] = v
-			totalHashes++
+	if resolveBlobs {
+		for _, streamData := range invalidStreams {
+			blobs, err := rf.GetBlobHashesForStream(streamData.StreamID)
+			if err != nil {
+				panic(err)
+			}
+			logrus.Printf("found %d blobs for stream %s", len(blobs.BlobHashes), streamData.SdHash)
 		}
 	}
 
-	sdHashes := make([]string, 0, totalHashes)
-	for _, h := range hashes {
-		sdHashes = append(sdHashes, h)
-	}
-	return sdHashes, nil
+	logrus.Printf("%d existing and %d not on the blockchain (%.3f%% missing)", len(validStreams),
+		len(invalidStreams), (float64(len(invalidStreams))/float64(len(validStreams)+len(invalidStreams)))*100)
 }

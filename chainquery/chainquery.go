@@ -131,13 +131,13 @@ func (c *CQApi) ClaimExists(sdHash string) (bool, error) {
 	return false, nil
 }
 
-func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) (map[string]bool, error) {
+func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) error {
 	args := make([]interface{}, len(streamData))
 	for i, sd := range streamData {
 		args[i] = sd.SdHash
 	}
 	batches := int(math.Ceil(float64(len(args)) / float64(shared.MysqlMaxBatchSize)))
-	existingHashes := make(map[string]bool, len(args))
+	existingHashes := make(map[string]int, len(args))
 	for i := 0; i < batches; i++ {
 		ceiling := len(args)
 		if (i+1)*shared.MysqlMaxBatchSize < ceiling {
@@ -146,19 +146,33 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 		logrus.Printf("checking for existing hashes. Batch %d of %d", i+1, batches)
 		err := c.batchedClaimsExist(args[i*shared.MysqlMaxBatchSize:ceiling], existingHashes, checkExpired, checkSpent)
 		if err != nil {
-			return nil, errors.Err(err)
+			return errors.Err(err)
 		}
 	}
-	for _, sd := range streamData {
-		_, ok := existingHashes[sd.SdHash]
+	for i, sd := range streamData {
+		chainState, ok := existingHashes[sd.SdHash]
 		if !ok {
-			existingHashes[sd.SdHash] = false
+			streamData[i].Exists = false
+		} else {
+			streamData[i].Exists = true
+			switch chainState {
+			case Expired:
+				streamData[i].Expired = true
+			case Spent:
+				streamData[i].Spent = true
+			}
 		}
 	}
-	return existingHashes, nil
+	return nil
 }
 
-func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[string]bool, checkExpired bool, checkSpent bool) error {
+const (
+	Exists = iota
+	Expired
+	Spent
+)
+
+func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[string]int, checkExpired bool, checkSpent bool) error {
 	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
 	if err != nil {
 		return errors.Err(err)
@@ -171,12 +185,12 @@ func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[st
 		if err != nil {
 			return errors.Err(err)
 		}
-		existingHashes[h] = true
+		existingHashes[h] = Exists
 		if checkExpired && bidState == "Expired" {
-			existingHashes[h] = false
+			existingHashes[h] = Expired
 		}
 		if checkSpent && bidState == "Spent" {
-			existingHashes[h] = false
+			existingHashes[h] = Spent
 		}
 	}
 	return nil

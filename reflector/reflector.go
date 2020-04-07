@@ -127,14 +127,20 @@ func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.Stream
 	return streamData, newOffset, nil
 }
 
+type StreamBlobs struct {
+	BlobHashes []string `json:"blob_hashes"`
+	BlobIds    []int64  `json:"blob_ids"`
+}
+
 // getStreams returns a slice of indexes referencing sdBlobs and an offset for the subsequent call which should be passed in as offset
-func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (map[string]int64, error) {
+func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*StreamBlobs, error) {
 	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, sdBlobID)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
 	defer shared.CloseRows(rows)
-	streamBlobs := make(map[string]int64, 50)
+	blobHashes := make([]string, 0, 50)
+	blobIds := make([]int64, 0, 50)
 	for rows.Next() {
 		var id int64
 		var hash string
@@ -142,7 +148,11 @@ func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (map[string]int64,
 		if err != nil {
 			return nil, errors.Err(err)
 		}
-		streamBlobs[hash] = id
+		blobHashes = append(blobHashes, hash)
+		blobIds = append(blobIds, id)
 	}
-	return streamBlobs, nil
+	return &StreamBlobs{
+		BlobHashes: blobHashes,
+		BlobIds:    blobIds,
+	}, nil
 }
