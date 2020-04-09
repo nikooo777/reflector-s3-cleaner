@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
 	"time"
 
 	"reflector-s3-cleaner/configs"
@@ -11,9 +13,9 @@ import (
 
 	"github.com/lbryio/lbry.go/v2/extras/errors"
 	"github.com/lbryio/lbry.go/v2/extras/query"
-	"github.com/sirupsen/logrus"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/nullbio/null.v6"
 )
 
@@ -131,29 +133,40 @@ func (c *CQApi) ClaimExists(sdHash string) (bool, error) {
 	return false, nil
 }
 
+const (
+	Exists = iota
+	Expired
+	Spent
+)
+
 func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) error {
 	args := make([]interface{}, len(streamData))
 	for i, sd := range streamData {
 		args[i] = sd.SdHash
 	}
 	batches := int(math.Ceil(float64(len(args)) / float64(shared.MysqlMaxBatchSize)))
-	existingHashes := make(map[string]int, len(args))
+	existingHashes := &sync.Map{}
+	wg := &sync.WaitGroup{}
 	for i := 0; i < batches; i++ {
+		concurrentLookups := runtime.NumCPU()
+		if (i+1)%concurrentLookups == 0 {
+			wg.Wait()
+		}
+		wg.Add(1)
 		ceiling := len(args)
 		if (i+1)*shared.MysqlMaxBatchSize < ceiling {
 			ceiling = (i + 1) * shared.MysqlMaxBatchSize
 		}
-		logrus.Printf("checking for existing hashes. Batch %d of %d", i+1, batches)
-		err := c.batchedClaimsExist(args[i*shared.MysqlMaxBatchSize:ceiling], existingHashes, checkExpired, checkSpent)
-		if err != nil {
-			return errors.Err(err)
-		}
+		go c.queryBatch(i, batches, ceiling, args, checkExpired, checkSpent, existingHashes, wg)
 	}
+	wg.Wait()
 	for i, sd := range streamData {
-		chainState, ok := existingHashes[sd.SdHash]
+		val, ok := existingHashes.Load(sd.SdHash)
+		//chainState, ok := existingHashes[sd.SdHash]
 		if !ok {
 			streamData[i].Exists = false
 		} else {
+			chainState := val.(int)
 			streamData[i].Exists = true
 			switch chainState {
 			case Expired:
@@ -166,13 +179,16 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 	return nil
 }
 
-const (
-	Exists = iota
-	Expired
-	Spent
-)
+func (c *CQApi) queryBatch(batch, batches, ceiling int, args []interface{}, checkExpired, checkSpent bool, existingHashes *sync.Map, wg *sync.WaitGroup) {
+	logrus.Printf("checking for existing hashes. Batch %d of %d", batch+1, batches)
+	err := c.claimsExist(args[batch*shared.MysqlMaxBatchSize:ceiling], existingHashes, checkExpired, checkSpent, wg)
+	if err != nil {
+		logrus.Errorf("batch %d reported an error: %s", batch+1, errors.FullTrace(err))
+	}
+}
 
-func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[string]int, checkExpired bool, checkSpent bool) error {
+func (c *CQApi) claimsExist(sdHashes []interface{}, existingHashes *sync.Map, checkExpired bool, checkSpent bool, wg *sync.WaitGroup) error {
+	defer wg.Done()
 	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
 	if err != nil {
 		return errors.Err(err)
@@ -185,13 +201,14 @@ func (c *CQApi) batchedClaimsExist(sdHashes []interface{}, existingHashes map[st
 		if err != nil {
 			return errors.Err(err)
 		}
-		existingHashes[h] = Exists
+		newState := Exists
 		if checkExpired && bidState == "Expired" {
-			existingHashes[h] = Expired
+			newState = Expired
 		}
 		if checkSpent && bidState == "Spent" {
-			existingHashes[h] = Spent
+			newState = Spent
 		}
+		existingHashes.Store(h, newState)
 	}
 	return nil
 }
