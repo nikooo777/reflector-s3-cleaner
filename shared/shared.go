@@ -23,3 +23,8 @@ type StreamData struct {
 	Expired  bool   `json:"expired"`
 	Spent    bool   `json:"spent"`
 }
+
+type StreamBlobs struct {
+	BlobHashes []string `json:"blob_hashes"`
+	BlobIds    []int64  `json:"blob_ids"`
+}

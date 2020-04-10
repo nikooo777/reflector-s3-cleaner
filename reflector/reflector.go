@@ -99,7 +99,7 @@ func (c *ReflectorApi) GetStreams(limit int64) ([]shared.StreamData, error) {
 
 // getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
 func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.StreamData, int64, error) {
-	upperLimit := offset + batchSize //+ int64(math.Min(float64(limit), float64(batchSize)))
+	upperLimit := offset + batchSize
 	rows, err := c.dbConn.Query(`SELECT s.id, s.sd_blob_id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id asc limit ?`, offset, upperLimit, limit)
 	if err != nil {
 		return nil, offset, errors.Err(err)
@@ -127,13 +127,8 @@ func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.Stream
 	return streamData, newOffset, nil
 }
 
-type StreamBlobs struct {
-	BlobHashes []string `json:"blob_hashes"`
-	BlobIds    []int64  `json:"blob_ids"`
-}
-
 // getStreams returns a slice of indexes referencing sdBlobs and an offset for the subsequent call which should be passed in as offset
-func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*StreamBlobs, error) {
+func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*shared.StreamBlobs, error) {
 	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, sdBlobID)
 	if err != nil {
 		return nil, errors.Err(err)
@@ -151,7 +146,7 @@ func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*StreamBlobs, err
 		blobHashes = append(blobHashes, hash)
 		blobIds = append(blobIds, id)
 	}
-	return &StreamBlobs{
+	return &shared.StreamBlobs{
 		BlobHashes: blobHashes,
 		BlobIds:    blobIds,
 	}, nil

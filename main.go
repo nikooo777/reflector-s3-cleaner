@@ -133,7 +133,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 	if resolveBlobs {
-		blobsToDelete := make([]reflector.StreamBlobs, len(streamData))
+		blobsToDelete := make([]shared.StreamBlobs, len(streamData))
 		totalBlobs := 0
 		for _, streamData := range invalidStreams {
 			blobs, err := rf.GetBlobHashesForStream(streamData.StreamID)

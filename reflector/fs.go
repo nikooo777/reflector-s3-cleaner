@@ -40,7 +40,7 @@ func LoadStreamData(path string) ([]shared.StreamData, error) {
 	return streamData, nil
 }
 
-func SaveBlobs(blobs []StreamBlobs, path string) error {
+func SaveBlobs(blobs []shared.StreamBlobs, path string) error {
 	logrus.Printf("saving %d sets of blobs to %s", len(blobs), path)
 	file, err := json.MarshalIndent(blobs, "", "")
 	if err != nil {
