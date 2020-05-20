@@ -40,7 +40,7 @@ func Init(awsCreds Credentials) (*Purger, error) {
 
 type FailedDeletes struct {
 	Hash string
-	err  error
+	Err  error
 }
 type DeleteResults struct {
 	Failures  []FailedDeletes
@@ -81,7 +81,7 @@ func (p *Purger) DeleteStream(streamBlobs shared.StreamBlobs) (*DeleteResults, e
 		for _, err := range res.Errors {
 			failedDeletes = append(failedDeletes, FailedDeletes{
 				Hash: *err.Key,
-				err:  errors.Prefix(*err.Code, errors.Err(err.Message)),
+				Err:  errors.Prefix(*err.Code, errors.Err(err.Message)),
 			})
 		}
 		for _, o := range res.Deleted {

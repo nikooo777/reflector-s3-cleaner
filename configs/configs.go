@@ -14,6 +14,12 @@ type DbConfig struct {
 type Configs struct {
 	Chainquery DbConfig `json:"chainquery"`
 	Reflector  DbConfig `json:"reflector"`
+	AWS        struct {
+		Key    string `json:"key"`
+		Secret string `json:"secret"`
+		Region string `json:"region"`
+		Bucket string `json:"bucket"`
+	}
 }
 
 var Configuration *Configs

@@ -3,6 +3,7 @@ package reflector
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"reflector-s3-cleaner/configs"
 	"reflector-s3-cleaner/shared"
@@ -21,15 +22,12 @@ type ReflectorApi struct {
 var instance *ReflectorApi
 
 func Init() (*ReflectorApi, error) {
-	if instance != nil {
-		return instance, nil
-	}
-	db, err := connect()
-	if err != nil {
-		return nil, err
-	}
-	instance = &ReflectorApi{
-		dbConn: db,
+	if instance == nil {
+		db, err := connect()
+		if err != nil {
+			return nil, err
+		}
+		instance = &ReflectorApi{dbConn: db}
 	}
 	return instance, nil
 }
@@ -150,4 +148,26 @@ func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*shared.StreamBlo
 		BlobHashes: blobHashes,
 		BlobIds:    blobIds,
 	}, nil
+}
+
+func (c *ReflectorApi) MarkBlobsDeleted(hashes []string) (int, error) {
+	if len(hashes) == 0 {
+		return 0, nil
+	}
+	q := `UPDATE blob_ SET is_stored = 0 WHERE hash IN ("` + strings.Join(hashes, `","`) + `")`
+	//logrus.Info(q)
+	res, err := c.dbConn.Exec(q)
+	if err != nil {
+		return 0, errors.Err(err)
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, errors.Err(err)
+	}
+	return int(count), nil
+}
+
+// actually delete the stream and associated blob rows
+func (c *ReflectorApi) DeleteStreams(sdHashes []string) ([]string, error) {
+	return nil, nil
 }
