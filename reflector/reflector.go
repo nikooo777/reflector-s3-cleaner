@@ -3,9 +3,11 @@ package reflector
 import (
 	"database/sql"
 	"fmt"
+	"runtime"
+	"sync"
 
-	"reflector-s3-cleaner/configs"
-	"reflector-s3-cleaner/shared"
+	"github.com/nikooo777/reflector-s3-cleaner/configs"
+	"github.com/nikooo777/reflector-s3-cleaner/shared"
 
 	"github.com/lbryio/lbry.go/v2/extras/errors"
 	"github.com/lbryio/lbry.go/v2/extras/query"
@@ -69,32 +71,89 @@ const batchSize = 10000
 // limit is an indicator for the function for when to stop looking for new IDs
 // it's not guaranteed that the amount of returned IDs matches the limit
 func (c *ReflectorApi) GetStreams(limit int64) ([]shared.StreamData, error) {
-	var curPos int64
+	// get the most recent stream ID
+	mostRecentStreamID, err := c.getMostRecentStreamID()
+	if err != nil {
+		return nil, err
+	}
+	logrus.Infof("most recent stream ID: %d", mostRecentStreamID)
+	// this is an approximation of the limit. if the database has deleted entries, the actual limit will be lower as the ID of a stream is an auto incrementing value
+	// when running across the whole dataset, a limit should be set very high to ensure that all streams are returned
+	if mostRecentStreamID > limit {
+		logrus.Warnf("most recent stream ID (%d) is higher than the limit (%d). Limiting to the latter", mostRecentStreamID, limit)
+		mostRecentStreamID = limit
+	}
+	type offsets struct {
+		start, end int64
+	}
 	allStreamData := make([]shared.StreamData, 0, limit)
-	stallCount := 0
-	for {
-		logrus.Printf("getting ids... cur pos: %d (%d fetched)", curPos, len(allStreamData))
-		streamData, newOffset, err := c.getStreamData(limit, curPos)
+	streamDataLock := sync.Mutex{}
+
+	jobs := make(chan offsets, runtime.NumCPU())
+	producerWg := sync.WaitGroup{}
+	consumerWg := sync.WaitGroup{}
+
+	producerWg.Add(1)
+	go func() {
+		defer producerWg.Done()
+		for i := int64(0); i < mostRecentStreamID; i += batchSize {
+			end := i + batchSize - 1
+			if end > mostRecentStreamID {
+				end = mostRecentStreamID
+			}
+			logrus.Infof("adding job for %d to %d", i, end)
+			jobs <- offsets{start: i, end: end}
+		}
+	}()
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		consumerWg.Add(1)
+		go func() {
+			defer consumerWg.Done()
+			for job := range jobs {
+				logrus.Infof("processing job for %d to %d", job.start, job.end)
+				sd, err := c.getStreamDataV2(job.start, job.end)
+				if err != nil {
+					logrus.Fatal(err)
+				}
+				streamDataLock.Lock()
+				allStreamData = append(allStreamData, sd...)
+				streamDataLock.Unlock()
+			}
+		}()
+	}
+
+	producerWg.Wait()
+	close(jobs)
+	consumerWg.Wait()
+
+	logrus.Infof("found %d streams out of the %d max expected", len(allStreamData), mostRecentStreamID)
+	return allStreamData, nil
+}
+
+// getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
+func (c *ReflectorApi) getStreamDataV2(start int64, end int64) ([]shared.StreamData, error) {
+	rows, err := c.dbConn.Query(`SELECT s.id, s.sd_blob_id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id`, start, end)
+	if err != nil {
+		return nil, errors.Err(err)
+	}
+	defer shared.CloseRows(rows)
+	streamData := make([]shared.StreamData, 0, batchSize)
+	for rows.Next() {
+		var streamID int64
+		var blobID int64
+		var sdHash string
+		err = rows.Scan(&streamID, &blobID, &sdHash)
 		if err != nil {
 			return nil, errors.Err(err)
 		}
-		if newOffset == curPos {
-			curPos += batchSize
-			stallCount++
-			if stallCount == 100 {
-				break
-			}
-		} else {
-			stallCount = 0
-			curPos = newOffset
-		}
-		allStreamData = append(allStreamData, streamData...)
-		if int64(len(allStreamData)) >= limit {
-			break
-		}
+		streamData = append(streamData, shared.StreamData{
+			SdHash:   sdHash,
+			StreamID: streamID,
+			SdBlobID: blobID,
+		})
 	}
-
-	return allStreamData, nil
+	return streamData, nil
 }
 
 // getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
@@ -127,7 +186,17 @@ func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.Stream
 	return streamData, newOffset, nil
 }
 
-// getStreams returns a slice of indexes referencing sdBlobs and an offset for the subsequent call which should be passed in as offset
+// getMostRecentStreamID returns the most recent stream ID
+func (c *ReflectorApi) getMostRecentStreamID() (int64, error) {
+	var streamID int64
+	err := c.dbConn.QueryRow(`SELECT id FROM stream ORDER BY id DESC LIMIT 1`).Scan(&streamID)
+	if err != nil {
+		return 0, errors.Err(err)
+	}
+	return streamID, nil
+}
+
+// GetBlobHashesForStream returns an object containing the blob hashes and ids for a given stream
 func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*shared.StreamBlobs, error) {
 	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, sdBlobID)
 	if err != nil {
@@ -145,6 +214,13 @@ func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*shared.StreamBlo
 		}
 		blobHashes = append(blobHashes, hash)
 		blobIds = append(blobIds, id)
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, errors.Err(err)
+	}
+	if len(blobIds) == 0 {
+		return nil, nil
 	}
 	return &shared.StreamBlobs{
 		BlobHashes: blobHashes,

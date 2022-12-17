@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"reflector-s3-cleaner/chainquery"
-	"reflector-s3-cleaner/configs"
-	"reflector-s3-cleaner/reflector"
-	"reflector-s3-cleaner/shared"
+	"github.com/nikooo777/reflector-s3-cleaner/chainquery"
+	"github.com/nikooo777/reflector-s3-cleaner/configs"
+	"github.com/nikooo777/reflector-s3-cleaner/reflector"
+	"github.com/nikooo777/reflector-s3-cleaner/shared"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -94,7 +94,6 @@ func cleaner(cmd *cobra.Command, args []string) {
 			}
 		}
 	}
-
 	var invalidStreams []shared.StreamData
 	var validStreams []shared.StreamData
 	if loadChainqueryData {

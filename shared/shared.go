@@ -6,7 +6,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const MysqlMaxBatchSize = 50000
+const MysqlMaxBatchSize = 10000
 
 func CloseRows(rows *sql.Rows) {
 	err := rows.Close()

@@ -3,13 +3,12 @@ package chainquery
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"runtime"
 	"sync"
 	"time"
 
-	"reflector-s3-cleaner/configs"
-	"reflector-s3-cleaner/shared"
+	"github.com/nikooo777/reflector-s3-cleaner/configs"
+	"github.com/nikooo777/reflector-s3-cleaner/shared"
 
 	"github.com/lbryio/lbry.go/v2/extras/errors"
 	"github.com/lbryio/lbry.go/v2/extras/query"
@@ -139,27 +138,53 @@ const (
 	Spent
 )
 
+func produce(resources []interface{}, jobs chan<- []interface{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for i := 0; i < len(resources); i += shared.MysqlMaxBatchSize {
+		logrus.Printf("checking for existing hashes. Batch %d of %d", i, len(resources))
+		j := i + shared.MysqlMaxBatchSize
+		if j > len(resources) {
+			j = len(resources)
+		}
+		batch := resources[i:j]
+		jobs <- batch
+	}
+
+}
+
+func (c *CQApi) consume(worker int, jobs <-chan []interface{}, wg *sync.WaitGroup, existingHashes *sync.Map, checkExpired bool, checkSpent bool) {
+	defer wg.Done()
+	for msg := range jobs {
+		logrus.Infof("product of %d items is consumed by worker %v", len(msg), worker)
+		err := c.claimsExist(msg, existingHashes, checkExpired, checkSpent)
+		if err != nil {
+			logrus.Errorf("batch processing reported an error: %s", errors.FullTrace(err))
+		}
+	}
+}
+
 func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) error {
-	args := make([]interface{}, len(streamData))
+	streamSdHashes := make([]interface{}, len(streamData))
 	for i, sd := range streamData {
-		args[i] = sd.SdHash
+		streamSdHashes[i] = sd.SdHash
 	}
-	batches := int(math.Ceil(float64(len(args)) / float64(shared.MysqlMaxBatchSize)))
 	existingHashes := &sync.Map{}
-	wg := &sync.WaitGroup{}
-	for i := 0; i < batches; i++ {
-		concurrentLookups := runtime.NumCPU()
-		if (i+1)%concurrentLookups == 0 {
-			wg.Wait()
-		}
-		wg.Add(1)
-		ceiling := len(args)
-		if (i+1)*shared.MysqlMaxBatchSize < ceiling {
-			ceiling = (i + 1) * shared.MysqlMaxBatchSize
-		}
-		go c.queryBatch(i, batches, ceiling, args, checkExpired, checkSpent, existingHashes, wg)
+
+	producerWg := &sync.WaitGroup{}
+	jobs := make(chan []interface{}, runtime.NumCPU())
+	producerWg.Add(1)
+	go produce(streamSdHashes, jobs, producerWg)
+
+	consumerWg := &sync.WaitGroup{}
+	for i := 0; i < runtime.NumCPU(); i++ {
+		consumerWg.Add(1)
+		go c.consume(i, jobs, consumerWg, existingHashes, checkExpired, checkSpent)
 	}
-	wg.Wait()
+
+	producerWg.Wait()
+	close(jobs)
+	consumerWg.Wait()
+
 	for i, sd := range streamData {
 		val, ok := existingHashes.Load(sd.SdHash)
 		//chainState, ok := existingHashes[sd.SdHash]
@@ -179,16 +204,7 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 	return nil
 }
 
-func (c *CQApi) queryBatch(batch, batches, ceiling int, args []interface{}, checkExpired, checkSpent bool, existingHashes *sync.Map, wg *sync.WaitGroup) {
-	logrus.Printf("checking for existing hashes. Batch %d of %d", batch+1, batches)
-	err := c.claimsExist(args[batch*shared.MysqlMaxBatchSize:ceiling], existingHashes, checkExpired, checkSpent, wg)
-	if err != nil {
-		logrus.Errorf("batch %d reported an error: %s", batch+1, errors.FullTrace(err))
-	}
-}
-
-func (c *CQApi) claimsExist(sdHashes []interface{}, existingHashes *sync.Map, checkExpired bool, checkSpent bool, wg *sync.WaitGroup) error {
-	defer wg.Done()
+func (c *CQApi) claimsExist(sdHashes []interface{}, existingHashes *sync.Map, checkExpired bool, checkSpent bool) error {
 	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
 	if err != nil {
 		return errors.Err(err)
