@@ -138,7 +138,7 @@ const (
 	Spent
 )
 
-func produce(resources []interface{}, jobs chan<- []interface{}, wg *sync.WaitGroup) {
+func produce(resources []shared.StreamData, jobs chan<- []shared.StreamData, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for i := 0; i < len(resources); i += shared.MysqlMaxBatchSize {
 		logrus.Printf("checking for existing hashes. Batch %d of %d", i, len(resources))
@@ -146,13 +146,12 @@ func produce(resources []interface{}, jobs chan<- []interface{}, wg *sync.WaitGr
 		if j > len(resources) {
 			j = len(resources)
 		}
-		batch := resources[i:j]
-		jobs <- batch
+		jobs <- resources[i:j]
 	}
 
 }
 
-func (c *CQApi) consume(worker int, jobs <-chan []interface{}, wg *sync.WaitGroup, existingHashes *sync.Map, checkExpired bool, checkSpent bool) {
+func (c *CQApi) consume(worker int, jobs <-chan []shared.StreamData, wg *sync.WaitGroup, existingHashes *sync.Map, checkExpired bool, checkSpent bool) {
 	defer wg.Done()
 	for msg := range jobs {
 		logrus.Infof("product of %d items is consumed by worker %v", len(msg), worker)
@@ -164,16 +163,16 @@ func (c *CQApi) consume(worker int, jobs <-chan []interface{}, wg *sync.WaitGrou
 }
 
 func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) error {
-	streamSdHashes := make([]interface{}, len(streamData))
-	for i, sd := range streamData {
-		streamSdHashes[i] = sd.SdHash
-	}
+	//streamSdHashes := make([]interface{}, len(streamData))
+	//for i, sd := range streamData {
+	//	streamSdHashes[i] = sd.SdHash
+	//}
 	existingHashes := &sync.Map{}
 
 	producerWg := &sync.WaitGroup{}
-	jobs := make(chan []interface{}, runtime.NumCPU())
+	jobs := make(chan []shared.StreamData, runtime.NumCPU())
 	producerWg.Add(1)
-	go produce(streamSdHashes, jobs, producerWg)
+	go produce(streamData, jobs, producerWg)
 
 	consumerWg := &sync.WaitGroup{}
 	for i := 0; i < runtime.NumCPU(); i++ {
@@ -186,8 +185,8 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 	consumerWg.Wait()
 
 	for i, sd := range streamData {
+		sd.Resolved = true
 		val, ok := existingHashes.Load(sd.SdHash)
-		//chainState, ok := existingHashes[sd.SdHash]
 		if !ok {
 			streamData[i].Exists = false
 		} else {
@@ -204,7 +203,11 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 	return nil
 }
 
-func (c *CQApi) claimsExist(sdHashes []interface{}, existingHashes *sync.Map, checkExpired bool, checkSpent bool) error {
+func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes *sync.Map, checkExpired bool, checkSpent bool) error {
+	sdHashes := make([]interface{}, len(streams))
+	for i, sd := range streams {
+		sdHashes[i] = sd.SdHash
+	}
 	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
 	if err != nil {
 		return errors.Err(err)

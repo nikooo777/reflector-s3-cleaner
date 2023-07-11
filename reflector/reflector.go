@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nikooo777/reflector-s3-cleaner/configs"
 	"github.com/nikooo777/reflector-s3-cleaner/shared"
@@ -133,7 +134,7 @@ func (c *ReflectorApi) GetStreams(limit int64) ([]shared.StreamData, error) {
 
 // getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
 func (c *ReflectorApi) getStreamDataV2(start int64, end int64) ([]shared.StreamData, error) {
-	rows, err := c.dbConn.Query(`SELECT s.id, s.sd_blob_id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id`, start, end)
+	rows, err := c.dbConn.Query(`SELECT s.id, b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id`, start, end)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
@@ -141,16 +142,14 @@ func (c *ReflectorApi) getStreamDataV2(start int64, end int64) ([]shared.StreamD
 	streamData := make([]shared.StreamData, 0, batchSize)
 	for rows.Next() {
 		var streamID int64
-		var blobID int64
 		var sdHash string
-		err = rows.Scan(&streamID, &blobID, &sdHash)
+		err = rows.Scan(&streamID, &sdHash)
 		if err != nil {
 			return nil, errors.Err(err)
 		}
 		streamData = append(streamData, shared.StreamData{
 			SdHash:   sdHash,
 			StreamID: streamID,
-			SdBlobID: blobID,
 		})
 	}
 	return streamData, nil
@@ -159,7 +158,7 @@ func (c *ReflectorApi) getStreamDataV2(start int64, end int64) ([]shared.StreamD
 // getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
 func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.StreamData, int64, error) {
 	upperLimit := offset + batchSize
-	rows, err := c.dbConn.Query(`SELECT s.id, s.sd_blob_id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id asc limit ?`, offset, upperLimit, limit)
+	rows, err := c.dbConn.Query(`SELECT s.id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id limit ?`, offset, upperLimit, limit)
 	if err != nil {
 		return nil, offset, errors.Err(err)
 	}
@@ -168,16 +167,14 @@ func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.Stream
 	newOffset := offset
 	for rows.Next() {
 		var streamID int64
-		var blobID int64
 		var sdHash string
-		err = rows.Scan(&streamID, &blobID, &sdHash)
+		err = rows.Scan(&streamID, &sdHash)
 		if err != nil {
 			return nil, 0, errors.Err(err)
 		}
 		streamData = append(streamData, shared.StreamData{
 			SdHash:   sdHash,
 			StreamID: streamID,
-			SdBlobID: blobID,
 		})
 		if streamID > newOffset {
 			newOffset = streamID
@@ -196,9 +193,9 @@ func (c *ReflectorApi) getMostRecentStreamID() (int64, error) {
 	return streamID, nil
 }
 
-// GetBlobHashesForStream returns an object containing the blob hashes and ids for a given stream
-func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*shared.StreamBlobs, error) {
-	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, sdBlobID)
+// getBlobHashesForStream returns an object containing the blob hashes and ids for a given stream
+func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (*shared.StreamBlobs, error) {
+	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, streamId)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
@@ -226,4 +223,43 @@ func (c *ReflectorApi) GetBlobHashesForStream(sdBlobID int64) (*shared.StreamBlo
 		BlobHashes: blobHashes,
 		BlobIds:    blobIds,
 	}, nil
+}
+
+// GetBlobHashesForStream takes a slice of streams, feeds it into a channel, schedules workers to get the blob hashes for each stream, and returns a slice of StreamBlobs
+func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) ([]shared.StreamBlobs, error) {
+	streamsChan := make(chan shared.StreamData, runtime.NumCPU())
+	streamsBlobs := make([]shared.StreamBlobs, 0, len(streams))
+	streamsLock := sync.Mutex{}
+	var streamBlobsWg sync.WaitGroup
+	blobsCount := int64(0)
+	for i := 0; i < runtime.NumCPU()*4; i++ {
+		streamBlobsWg.Add(1)
+		go func() {
+			defer streamBlobsWg.Done()
+			for stream := range streamsChan {
+				blobs, err := c.getBlobHashesForStream(stream.StreamID)
+				if err != nil {
+					logrus.Fatal(err)
+				}
+				if blobs != nil {
+					logrus.Printf("found %d blobs for stream %s (%d total)", len(blobs.BlobHashes), stream.SdHash, atomic.LoadInt64(&blobsCount))
+					streamsLock.Lock()
+					streamsBlobs = append(streamsBlobs, *blobs)
+					streamsLock.Unlock()
+					atomic.AddInt64(&blobsCount, int64(len(blobs.BlobIds)))
+				}
+			}
+		}()
+	}
+	for i, stream := range streams {
+		if i%100 == 0 {
+			logrus.Printf("queued %d/%d streams for blob hash retrieval", i, len(streams))
+		}
+		if !stream.IsValid() {
+			streamsChan <- stream
+		}
+	}
+	close(streamsChan)
+	streamBlobsWg.Wait()
+	return streamsBlobs, nil
 }

@@ -8,24 +8,21 @@ import (
 	"github.com/nikooo777/reflector-s3-cleaner/configs"
 	"github.com/nikooo777/reflector-s3-cleaner/reflector"
 	"github.com/nikooo777/reflector-s3-cleaner/shared"
+	"github.com/nikooo777/reflector-s3-cleaner/sqlite_store"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 var (
-	sdHashesPath         string
-	existingHashesPath   string
-	unresolvedHashesPath string
-	streamBlobsPath      string
-	loadReflectorData    bool
-	loadChainqueryData   bool
-	saveReflectorData    bool
-	saveChainqueryData   bool
-	checkExpired         bool
-	checkSpent           bool
-	resolveBlobs         bool
-	limit                int64
+	streamBlobsPath string
+	loadData        bool
+	resolveData     bool
+	saveData        bool
+	checkExpired    bool
+	checkSpent      bool
+	resolveBlobs    bool
+	limit           int64
 )
 
 func main() {
@@ -35,14 +32,9 @@ func main() {
 		Run:   cleaner,
 		Args:  cobra.RangeArgs(0, 0),
 	}
-	cmd.Flags().StringVar(&sdHashesPath, "sd_hashes", "sd_hashes.json", "path of sd_hashes")
-	cmd.Flags().StringVar(&existingHashesPath, "existing_hashes", "existing_sd_hashes.json", "path of sd_hashes that exist on chain")
-	cmd.Flags().StringVar(&unresolvedHashesPath, "unresolved_hashes", "unresolved_sd_hashes.json", "path of sd_hashes that don't exist on chain")
-	cmd.Flags().StringVar(&streamBlobsPath, "stream-blobs", "blobs_to_delete.json", "path of blobs set to delete")
-	cmd.Flags().BoolVar(&loadReflectorData, "load-reflector-data", false, "load results from file instead of querying the reflector database unnecessarily")
-	cmd.Flags().BoolVar(&loadChainqueryData, "load-chainquery-data", false, "load results from file instead of querying the chainquery database unnecessarily")
-	cmd.Flags().BoolVar(&saveReflectorData, "save-reflector-data", false, "save results to file once loaded from the reflector database")
-	cmd.Flags().BoolVar(&saveChainqueryData, "save-chainquery-data", false, "save results to file once loaded from the chainquery database")
+	cmd.Flags().BoolVar(&loadData, "load-data", false, "load the data from SQLite instead of querying the databases unnecessarily")
+	cmd.Flags().BoolVar(&resolveData, "resolve-data", false, "resolves the data against the chainquery database")
+	cmd.Flags().BoolVar(&saveData, "save-data", false, "save results to an SQLite database")
 	cmd.Flags().BoolVar(&checkExpired, "check-expired", true, "check for streams referenced by an expired claim")
 	cmd.Flags().BoolVar(&checkSpent, "check-spent", true, "check for streams referenced by a spent claim")
 	cmd.Flags().BoolVar(&resolveBlobs, "resolve-blobs", false, "resolve the blobs for the invalid streams")
@@ -55,13 +47,12 @@ func main() {
 }
 
 func cleaner(cmd *cobra.Command, args []string) {
-	if loadReflectorData == saveReflectorData && saveReflectorData == true {
-		panic("You can't use --load-reflector-data and --save-reflector-data at the same time")
+	localStore, err := sqlite_store.Init()
+	if err != nil {
+		logrus.Fatal(err)
 	}
-	if loadChainqueryData == saveChainqueryData && saveChainqueryData == true {
-		panic("You can't use --load-chainquery-data and --save-chainquery-data at the same time")
-	}
-	err := configs.Init("./config.json")
+
+	err = configs.Init("./config.json")
 	if err != nil {
 		panic(err)
 	}
@@ -76,8 +67,8 @@ func cleaner(cmd *cobra.Command, args []string) {
 	}
 
 	var streamData []shared.StreamData
-	if loadReflectorData {
-		streamData, err = reflector.LoadStreamData(sdHashesPath)
+	if loadData {
+		streamData, err = localStore.LoadStreamData() //reflector.LoadStreamData(sdHashesPath)
 		if err != nil {
 			panic(err)
 		}
@@ -86,71 +77,45 @@ func cleaner(cmd *cobra.Command, args []string) {
 		if err != nil {
 			panic(err)
 		}
-
-		if saveReflectorData {
-			err = reflector.SaveStreamData(streamData, sdHashesPath)
-			if err != nil {
-				panic(err)
-			}
-		}
 	}
-	var invalidStreams []shared.StreamData
-	var validStreams []shared.StreamData
-	if loadChainqueryData {
-		validStreams, err = chainquery.LoadResolvedHashes(existingHashesPath)
-		if err != nil {
-			panic(err)
-		}
-		invalidStreams, err = chainquery.LoadResolvedHashes(unresolvedHashesPath)
-		if err != nil {
-			panic(err)
-		}
-	} else {
+
+	if resolveData {
 		err := cq.BatchedClaimsExist(streamData, checkExpired, checkSpent)
 		if err != nil {
 			panic(err)
 		}
-
-		invalidStreams = make([]shared.StreamData, 0, len(streamData))
-		validStreams = make([]shared.StreamData, 0, len(streamData))
-		for _, stream := range streamData {
-			if !stream.Exists || (checkExpired && stream.Expired) || (checkSpent && stream.Spent) {
-				invalidStreams = append(invalidStreams, stream)
-			} else {
-				validStreams = append(validStreams, stream)
-			}
-		}
-		if saveChainqueryData {
-			err = chainquery.SaveHashes(invalidStreams, unresolvedHashesPath)
-			if err != nil {
-				panic(err)
-			}
-			err = chainquery.SaveHashes(validStreams, existingHashesPath)
-			if err != nil {
-				panic(err)
-			}
+	}
+	if saveData {
+		err = localStore.StoreStreams(streamData)
+		if err != nil {
+			panic(err)
 		}
 	}
 	if resolveBlobs {
-		blobsToDelete := make([]shared.StreamBlobs, len(streamData))
-		totalBlobs := 0
-		for _, streamData := range invalidStreams {
-			blobs, err := rf.GetBlobHashesForStream(streamData.StreamID)
-			if err != nil {
-				panic(err)
-			}
-			if blobs != nil {
-				blobsToDelete = append(blobsToDelete, *blobs)
-				totalBlobs += len(blobs.BlobIds)
-			}
-			logrus.Printf("found %d blobs for stream %s (%d total)", len(blobs.BlobHashes), streamData.SdHash, totalBlobs)
-		}
+		blobsToDelete, err := rf.GetBlobHashesForStream(streamData)
+		logrus.Infof("Found %d potential blobs to delete", len(blobsToDelete))
 		err = reflector.SaveBlobs(blobsToDelete, streamBlobsPath)
 		if err != nil {
 			panic(err)
 		}
 	}
+	var validStreams, notOnChain, expired, spent int64
+	for _, sd := range streamData {
+		if !sd.Exists {
+			notOnChain++
+			continue
+		}
+		if sd.Expired {
+			expired++
+			continue
+		}
+		if sd.Spent {
+			spent++
+			continue
+		}
+		validStreams++
+	}
 
-	logrus.Printf("%d existing and %d not on the blockchain (%.3f%% missing)", len(validStreams),
-		len(invalidStreams), (float64(len(invalidStreams))/float64(len(validStreams)+len(invalidStreams)))*100)
+	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,
+		notOnChain, expired, spent, notOnChain+expired+spent, float64(notOnChain+expired+spent)/float64(len(streamData))*100)
 }

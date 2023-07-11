@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
+	"os"
 
 	"github.com/nikooo777/reflector-s3-cleaner/shared"
 
@@ -26,7 +27,7 @@ func SaveStreamData(streamData []shared.StreamData, path string) error {
 		}
 	}
 
-	err := ioutil.WriteFile(path, buff.Bytes(), 0644)
+	err := os.WriteFile(path, buff.Bytes(), 0644)
 	if err != nil {
 		return errors.Err(err)
 	}
@@ -37,7 +38,7 @@ func LoadStreamData(path string) ([]shared.StreamData, error) {
 	logrus.Printf("loading hashes from %s", path)
 	streamData := make([]shared.StreamData, 0)
 
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, errors.Err(err)
 	}

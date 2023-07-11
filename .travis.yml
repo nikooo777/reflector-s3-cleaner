@@ -12,4 +12,5 @@ cache:
     - $HOME/gopath/pkg/mod
 
 script:
+  - make test
   - make
