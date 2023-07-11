@@ -185,7 +185,7 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 	consumerWg.Wait()
 
 	for i, sd := range streamData {
-		sd.Resolved = true
+		streamData[i].Resolved = true
 		val, ok := existingHashes.Load(sd.SdHash)
 		if !ok {
 			streamData[i].Exists = false
