@@ -157,7 +157,7 @@ func (c *CQApi) consume(worker int, jobs <-chan []shared.StreamData, wg *sync.Wa
 		logrus.Infof("product of %d items is consumed by worker %v", len(msg), worker)
 		err := c.claimsExist(msg, existingHashes, checkExpired, checkSpent)
 		if err != nil {
-			logrus.Errorf("batch processing reported an error: %s", errors.FullTrace(err))
+			logrus.Fatalf("batch processing reported an error: %s", errors.FullTrace(err))
 		}
 	}
 }

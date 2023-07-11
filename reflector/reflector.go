@@ -255,7 +255,7 @@ func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) ([]sh
 		if i%100 == 0 {
 			logrus.Printf("queued %d/%d streams for blob hash retrieval", i, len(streams))
 		}
-		if !stream.IsValid() {
+		if stream.Resolved && !stream.IsValid() {
 			streamsChan <- stream
 		}
 	}
