@@ -3,8 +3,7 @@ package reflector
 import (
 	"testing"
 
-	"reflector-s3-cleaner/configs"
-
+	"github.com/nikooo777/reflector-s3-cleaner/configs"
 	"github.com/stretchr/testify/assert"
 )
 

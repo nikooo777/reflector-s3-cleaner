@@ -93,11 +93,14 @@ func cleaner(cmd *cobra.Command, args []string) {
 	}
 	if resolveBlobs {
 		blobsToDelete, err := rf.GetBlobHashesForStream(streamData)
-		logrus.Infof("Found %d potential blobs to delete", len(blobsToDelete))
-		err = reflector.SaveBlobs(blobsToDelete, streamBlobsPath)
 		if err != nil {
 			panic(err)
 		}
+		logrus.Infof("Found %d potential blobs to delete", len(blobsToDelete))
+		//err = reflector.SaveBlobs(blobsToDelete, streamBlobsPath)
+		//if err != nil {
+		//	panic(err)
+		//}
 	}
 	var validStreams, notOnChain, expired, spent int64
 	for _, sd := range streamData {
