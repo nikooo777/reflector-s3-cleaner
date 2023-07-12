@@ -194,14 +194,14 @@ func (c *ReflectorApi) getMostRecentStreamID() (int64, error) {
 }
 
 // getBlobHashesForStream returns an object containing the blob hashes and ids for a given stream
-func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (*shared.StreamBlobs, error) {
+func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (map[string]int64, error) {
 	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, streamId)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
 	defer shared.CloseRows(rows)
-	blobHashes := make([]string, 0, 50)
-	blobIds := make([]int64, 0, 50)
+	streamBlobs := make(map[string]int64)
+	blobsFound := 0
 	for rows.Next() {
 		var id int64
 		var hash string
@@ -209,28 +209,24 @@ func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (*shared.StreamBlo
 		if err != nil {
 			return nil, errors.Err(err)
 		}
-		blobHashes = append(blobHashes, hash)
-		blobIds = append(blobIds, id)
+		streamBlobs[hash] = id
+		blobsFound++
 	}
 	err = rows.Err()
 	if err != nil {
 		return nil, errors.Err(err)
 	}
-	if len(blobIds) == 0 {
+	if blobsFound == 0 {
 		return nil, nil
 	}
-	return &shared.StreamBlobs{
-		BlobHashes: blobHashes,
-		BlobIds:    blobIds,
-	}, nil
+	return streamBlobs, nil
 }
 
 // GetBlobHashesForStream takes a slice of streams, feeds it into a channel, schedules workers to get the blob hashes for each stream, and returns a slice of StreamBlobs
-func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) ([]shared.StreamBlobs, error) {
-	streamsChan := make(chan shared.StreamData, runtime.NumCPU())
-	streamsBlobs := make([]shared.StreamBlobs, 0, len(streams))
-	streamsLock := sync.Mutex{}
+func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) (int64, error) {
+	streamsChan := make(chan shared.StreamData, runtime.NumCPU()*4)
 	var streamBlobsWg sync.WaitGroup
+	var streamsToBlobsMap = sync.Map{}
 	blobsCount := int64(0)
 	for i := 0; i < runtime.NumCPU()*4; i++ {
 		streamBlobsWg.Add(1)
@@ -242,11 +238,9 @@ func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) ([]sh
 					logrus.Fatal(err)
 				}
 				if blobs != nil {
-					logrus.Printf("found %d blobs for stream %s (%d total)", len(blobs.BlobHashes), stream.SdHash, atomic.LoadInt64(&blobsCount))
-					streamsLock.Lock()
-					streamsBlobs = append(streamsBlobs, *blobs)
-					streamsLock.Unlock()
-					atomic.AddInt64(&blobsCount, int64(len(blobs.BlobIds)))
+					logrus.Printf("found %d blobs for stream %s (%d total)", len(blobs), stream.SdHash, atomic.LoadInt64(&blobsCount))
+					streamsToBlobsMap.Store(stream.StreamID, blobs)
+					atomic.AddInt64(&blobsCount, int64(len(blobs)))
 				}
 			}
 		}()
@@ -261,5 +255,12 @@ func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) ([]sh
 	}
 	close(streamsChan)
 	streamBlobsWg.Wait()
-	return streamsBlobs, nil
+
+	for i, stream := range streams {
+		val, found := streamsToBlobsMap.LoadAndDelete(stream.StreamID)
+		if found {
+			streams[i].StreamBlobs = val.(map[string]int64)
+		}
+	}
+	return blobsCount, nil
 }

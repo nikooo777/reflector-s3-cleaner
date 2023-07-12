@@ -31,8 +31,9 @@ func Init() (*Store, error) {
 	}
 	// create blobs table that references the stream table
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS blobs (
-    stream_id bigint(20) NOT NULL PRIMARY KEY,
-    blob_hash char(96) NOT NULL UNIQUE ,
+    blob_hash char(96) NOT NULL PRIMARY KEY,
+    stream_id bigint(20) NOT NULL,
+    blob_id bigint(20) NOT NULL,
     deleted tinyint(1) NOT NULL,
     FOREIGN KEY (stream_id) REFERENCES streams(stream_id)
 	)`)
@@ -100,4 +101,36 @@ func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
 	}
 
 	return streamData, nil
+}
+
+func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO blobs (stream_id, blob_hash, deleted, blob_id) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, sd := range streamData {
+		if sd.StreamBlobs == nil {
+			continue
+		}
+		for blobHash, blobId := range sd.StreamBlobs {
+			_, err = stmt.Exec(sd.StreamID, blobHash, false, blobId)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -16,12 +16,13 @@ func CloseRows(rows *sql.Rows) {
 }
 
 type StreamData struct {
-	SdHash   string `json:"sd_hash"`
-	StreamID int64  `json:"stream_id"`
-	Exists   bool   `json:"exists"`
-	Expired  bool   `json:"expired"`
-	Spent    bool   `json:"spent"`
-	Resolved bool   `json:"resolved"`
+	SdHash      string           `json:"sd_hash"`
+	StreamID    int64            `json:"stream_id"`
+	Exists      bool             `json:"exists"`
+	Expired     bool             `json:"expired"`
+	Spent       bool             `json:"spent"`
+	Resolved    bool             `json:"resolved"`
+	StreamBlobs map[string]int64 `json:"stream_blobs"`
 }
 
 func (stream *StreamData) IsValid() bool {
@@ -29,9 +30,4 @@ func (stream *StreamData) IsValid() bool {
 		return false
 	}
 	return true
-}
-
-type StreamBlobs struct {
-	BlobHashes []string `json:"blob_hashes"`
-	BlobIds    []int64  `json:"blob_ids"`
 }

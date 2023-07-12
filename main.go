@@ -15,14 +15,13 @@ import (
 )
 
 var (
-	streamBlobsPath string
-	loadData        bool
-	resolveData     bool
-	saveData        bool
-	checkExpired    bool
-	checkSpent      bool
-	resolveBlobs    bool
-	limit           int64
+	loadData     bool
+	resolveData  bool
+	saveData     bool
+	checkExpired bool
+	checkSpent   bool
+	resolveBlobs bool
+	limit        int64
 )
 
 func main() {
@@ -68,7 +67,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 
 	var streamData []shared.StreamData
 	if loadData {
-		streamData, err = localStore.LoadStreamData() //reflector.LoadStreamData(sdHashesPath)
+		streamData, err = localStore.LoadStreamData()
 		if err != nil {
 			panic(err)
 		}
@@ -92,15 +91,15 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 	}
 	if resolveBlobs {
-		blobsToDelete, err := rf.GetBlobHashesForStream(streamData)
+		blobsToDeleteCount, err := rf.GetBlobHashesForStream(streamData)
 		if err != nil {
 			panic(err)
 		}
-		logrus.Infof("Found %d potential blobs to delete", len(blobsToDelete))
-		//err = reflector.SaveBlobs(blobsToDelete, streamBlobsPath)
-		//if err != nil {
-		//	panic(err)
-		//}
+		logrus.Infof("Found %d potential blobs to delete", blobsToDeleteCount)
+		err = localStore.StoreBlobs(streamData)
+		if err != nil {
+			logrus.Errorf("Failed to store blobs: %s", err.Error())
+		}
 	}
 	var validStreams, notOnChain, expired, spent int64
 	for _, sd := range streamData {
