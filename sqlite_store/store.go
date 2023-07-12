@@ -77,7 +77,7 @@ func (s *Store) StoreStreams(streamData []shared.StreamData) error {
 }
 func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
 	// Query the database
-	rows, err := s.db.Query("SELECT sd_hash, stream_id, exists_in_blockchain, expired, spent FROM streams")
+	rows, err := s.db.Query("SELECT sd_hash, stream_id, exists_in_blockchain, expired, spent, resolved FROM streams")
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
 	for rows.Next() {
 		var sd shared.StreamData
 		// Scan the retrieved row into the StreamData struct
-		if err := rows.Scan(&sd.SdHash, &sd.StreamID, &sd.Exists, &sd.Expired, &sd.Spent); err != nil {
+		if err := rows.Scan(&sd.SdHash, &sd.StreamID, &sd.Exists, &sd.Expired, &sd.Spent, &sd.Resolved); err != nil {
 			return nil, err
 		}
 		streamData = append(streamData, sd)
