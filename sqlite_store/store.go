@@ -24,7 +24,8 @@ func Init() (*Store, error) {
     exists_in_blockchain tinyint(1) NOT NULL,
     expired tinyint(1) NOT NULL,
     spent tinyint(1) NOT NULL,
-    resolved tinyint(1) NOT NULL DEFAULT 0
+    resolved tinyint(1) NOT NULL DEFAULT 0,
+    claim_id char(40) DEFAULT NULL
     )`)
 	if err != nil {
 		return nil, errors.Err(err)
@@ -53,7 +54,7 @@ func (s *Store) StoreStreams(streamData []shared.StreamData) error {
 	}
 
 	// prepare the statement
-	stmt, err := tx.Prepare("INSERT OR IGNORE INTO streams (sd_hash, stream_id, exists_in_blockchain, expired, spent, resolved) VALUES (?, ?, ?, ?, ?, ?)")
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO streams (sd_hash, stream_id, exists_in_blockchain, expired, spent, resolved, claim_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -61,7 +62,11 @@ func (s *Store) StoreStreams(streamData []shared.StreamData) error {
 
 	// insert records
 	for _, sd := range streamData {
-		_, err = stmt.Exec(sd.SdHash, sd.StreamID, sd.Exists, sd.Expired, sd.Spent, sd.Resolved)
+		//we don't need to know the claim_id of streams that will not be later deleted. this saves some space.
+		if sd.IsValid() {
+			sd.ClaimID = nil
+		}
+		_, err = stmt.Exec(sd.SdHash, sd.StreamID, sd.Exists, sd.Expired, sd.Spent, sd.Resolved, sd.ClaimID)
 		if err != nil {
 			return err
 		}

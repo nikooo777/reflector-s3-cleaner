@@ -23,6 +23,7 @@ type StreamData struct {
 	Spent       bool             `json:"spent"`
 	Resolved    bool             `json:"resolved"`
 	StreamBlobs map[string]int64 `json:"stream_blobs"`
+	ClaimID     *string          `json:"claim_id"`
 }
 
 func (stream *StreamData) IsValid() bool {

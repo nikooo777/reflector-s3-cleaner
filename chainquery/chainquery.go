@@ -151,11 +151,11 @@ func produce(resources []shared.StreamData, jobs chan<- []shared.StreamData, wg 
 
 }
 
-func (c *CQApi) consume(worker int, jobs <-chan []shared.StreamData, wg *sync.WaitGroup, existingHashes *sync.Map, checkExpired bool, checkSpent bool) {
+func (c *CQApi) consume(worker int, jobs <-chan []shared.StreamData, wg *sync.WaitGroup, existingHashes, claimIDs *sync.Map, checkExpired bool, checkSpent bool) {
 	defer wg.Done()
 	for msg := range jobs {
 		logrus.Infof("product of %d items is consumed by worker %v", len(msg), worker)
-		err := c.claimsExist(msg, existingHashes, checkExpired, checkSpent)
+		err := c.claimsExist(msg, existingHashes, claimIDs, checkExpired, checkSpent)
 		if err != nil {
 			logrus.Fatalf("batch processing reported an error: %s", errors.FullTrace(err))
 		}
@@ -163,11 +163,8 @@ func (c *CQApi) consume(worker int, jobs <-chan []shared.StreamData, wg *sync.Wa
 }
 
 func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired bool, checkSpent bool) error {
-	//streamSdHashes := make([]interface{}, len(streamData))
-	//for i, sd := range streamData {
-	//	streamSdHashes[i] = sd.SdHash
-	//}
 	existingHashes := &sync.Map{}
+	claimIDs := &sync.Map{}
 
 	producerWg := &sync.WaitGroup{}
 	jobs := make(chan []shared.StreamData, runtime.NumCPU())
@@ -177,7 +174,7 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 	consumerWg := &sync.WaitGroup{}
 	for i := 0; i < runtime.NumCPU(); i++ {
 		consumerWg.Add(1)
-		go c.consume(i, jobs, consumerWg, existingHashes, checkExpired, checkSpent)
+		go c.consume(i, jobs, consumerWg, existingHashes, claimIDs, checkExpired, checkSpent)
 	}
 
 	producerWg.Wait()
@@ -198,17 +195,22 @@ func (c *CQApi) BatchedClaimsExist(streamData []shared.StreamData, checkExpired 
 			case Spent:
 				streamData[i].Spent = true
 			}
+			resolvedClaimID, ok := claimIDs.Load(sd.SdHash)
+			if ok {
+				s := resolvedClaimID.(string)
+				streamData[i].ClaimID = &s
+			}
 		}
 	}
 	return nil
 }
 
-func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes *sync.Map, checkExpired bool, checkSpent bool) error {
+func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes, claimIDs *sync.Map, checkExpired bool, checkSpent bool) error {
 	sdHashes := make([]interface{}, len(streams))
 	for i, sd := range streams {
 		sdHashes[i] = sd.SdHash
 	}
-	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
+	rows, err := c.dbConn.Query(`SELECT sd_hash, bid_state, claim_id FROM claim where sd_hash in (`+query.Qs(len(sdHashes))+`)`, sdHashes...)
 	if err != nil {
 		return errors.Err(err)
 	}
@@ -216,7 +218,9 @@ func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes *sync.Ma
 	for rows.Next() {
 		var h string
 		var bidState string
-		err = rows.Scan(&h, &bidState)
+		var claimID string
+
+		err = rows.Scan(&h, &bidState, &claimID)
 		if err != nil {
 			return errors.Err(err)
 		}
@@ -228,6 +232,7 @@ func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes *sync.Ma
 			newState = Spent
 		}
 		existingHashes.Store(h, newState)
+		claimIDs.Store(h, claimID)
 	}
 	return nil
 }
