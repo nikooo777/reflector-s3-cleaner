@@ -1,22 +1,16 @@
 package main
 
 import (
-	"bufio"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"net"
 	"os"
-	"strings"
-	"time"
 
+	"github.com/nikooo777/reflector-s3-cleaner/blockchain"
 	"github.com/nikooo777/reflector-s3-cleaner/chainquery"
 	"github.com/nikooo777/reflector-s3-cleaner/configs"
 	"github.com/nikooo777/reflector-s3-cleaner/reflector"
 	"github.com/nikooo777/reflector-s3-cleaner/shared"
 	"github.com/nikooo777/reflector-s3-cleaner/sqlite_store"
 
-	"github.com/lbryio/lbry.go/v2/extras/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -126,7 +120,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 		if sd.Spent {
 			if doubleCheck && sd.ClaimID != nil {
-				exists, err := ClaimExists(*sd.ClaimID)
+				exists, err := blockchain.ClaimExists(*sd.ClaimID)
 				if err != nil {
 					logrus.Warnf("error checking claim: %s", err.Error())
 				}
@@ -134,6 +128,10 @@ func cleaner(cmd *cobra.Command, args []string) {
 					falseNegatives++
 					claimsThatExist = append(claimsThatExist, *sd.ClaimID)
 					logrus.Errorf("claim actually exists: %s", *sd.ClaimID)
+					err = localStore.UnflagStream(&sd)
+					if err != nil {
+						logrus.Errorf("error unflagging stream: %s", err.Error())
+					}
 				}
 			}
 			spent++
@@ -144,57 +142,5 @@ func cleaner(cmd *cobra.Command, args []string) {
 
 	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,
 		notOnChain, expired, spent, notOnChain+expired+spent, float64(notOnChain+expired+spent)/float64(len(streamData))*100)
-	logrus.Printf("%d false negatives", falseNegatives)
-}
-
-type HubResponse struct {
-	Jsonrpc string `json:"jsonrpc"`
-	Result  string `json:"result"`
-	Id      int    `json:"id"`
-}
-
-func ClaimExists(claimID string) (bool, error) {
-	request := fmt.Sprintf(`{ "id": 0, "method":"blockchain.claimtrie.getclaimbyid", "params": ["%s"]}`+"\n", claimID)
-
-	// Connect to the server
-	conn, err := net.Dial("tcp", "s-hub1.odysee.com:50001")
-	if err != nil {
-		logrus.Println("Error connecting:", err.Error())
-		return false, errors.Err(err)
-	}
-	defer conn.Close()
-
-	// Write the request
-	conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) // Set timeout
-	_, err = conn.Write([]byte(request))
-	if err != nil {
-		logrus.Println("Error writing:", err.Error())
-		return false, errors.Err(err)
-	}
-
-	// Read the response
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // Set timeout
-	reader := bufio.NewReader(conn)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		logrus.Println("Error reading:", err.Error())
-		return false, errors.Err(err)
-	}
-
-	var hubResponse HubResponse
-	err = json.Unmarshal([]byte(response), &hubResponse)
-	if err != nil {
-		return false, errors.Err(err)
-	}
-	//base64 decode the result
-	decoded, err := base64.StdEncoding.DecodeString(hubResponse.Result)
-	if err != nil {
-		return false, errors.Err(err)
-	}
-	stringRepresentation := string(decoded)
-	if strings.Contains(stringRepresentation, "Could not find claim at") {
-		return false, nil
-	}
-
-	return true, nil
+	logrus.Printf("%d false negatives", falseNegatives corrected)
 }

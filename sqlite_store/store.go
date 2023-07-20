@@ -46,6 +46,7 @@ func Init() (*Store, error) {
 	}
 	return newStore, nil
 }
+
 func (s *Store) StoreStreams(streamData []shared.StreamData) error {
 	// begin a transaction
 	tx, err := s.db.Begin()
@@ -80,6 +81,48 @@ func (s *Store) StoreStreams(streamData []shared.StreamData) error {
 
 	return nil
 }
+
+// UnflagStream sets the stream to spent=0, expired=0, exists_in_blockchain=1, resolved=1 and removes any blobs in the blobs table related to the stream_id of the stream.
+func (s *Store) UnflagStream(streamData *shared.StreamData) error {
+	// Begin a transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	// Prepare statement to update streams table
+	updateStmt, err := tx.Prepare("UPDATE streams SET spent = 0, expired = 0, exists_in_blockchain = 1, resolved = 1 WHERE stream_id = ?")
+	if err != nil {
+		return err
+	}
+
+	// Execute update statement
+	_, err = updateStmt.Exec(streamData.StreamID)
+	if err != nil {
+		return err
+	}
+
+	// Prepare statement to delete from blobs table
+	deleteStmt, err := tx.Prepare("DELETE FROM blobs WHERE stream_id = ?")
+	if err != nil {
+		return err
+	}
+
+	// Execute delete statement
+	_, err = deleteStmt.Exec(streamData.StreamID)
+	if err != nil {
+		return err
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
 	// Query the database
 	rows, err := s.db.Query("SELECT sd_hash, stream_id, exists_in_blockchain, expired, spent, resolved, claim_id FROM streams")
