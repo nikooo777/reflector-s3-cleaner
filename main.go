@@ -142,5 +142,5 @@ func cleaner(cmd *cobra.Command, args []string) {
 
 	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,
 		notOnChain, expired, spent, notOnChain+expired+spent, float64(notOnChain+expired+spent)/float64(len(streamData))*100)
-	logrus.Printf("%d false negatives", falseNegatives corrected)
+	logrus.Printf("%d false negatives corrected", falseNegatives)
 }
