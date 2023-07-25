@@ -183,35 +183,42 @@ func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
 	return nil
 }
 
-func (s *Store) LoadBlobs(streamData []shared.StreamData) error {
+func (s *Store) LoadBlobs(streamData []shared.StreamData) (int64, error) {
+	totalBlobsCount := int64(0)
 	for i, sd := range streamData {
 		if sd.IsValid() {
 			continue
 		}
-		err := s.loadBlobsForStream(&streamData[i])
+		cnt, err := s.loadBlobsForStream(&streamData[i])
 		if err != nil {
-			return err
+			return totalBlobsCount, err
 		}
+		totalBlobsCount += cnt
 	}
-	return nil
+	return totalBlobsCount, nil
 }
 
-func (s *Store) loadBlobsForStream(streamData *shared.StreamData) error {
+func (s *Store) loadBlobsForStream(streamData *shared.StreamData) (int64, error) {
+	blobsCount := int64(0)
 	rows, err := s.db.Query("SELECT blob_hash, blob_id FROM blobs WHERE stream_id = ?", streamData.StreamID)
 	if err != nil {
-		return err
+		return blobsCount, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var blobHash string
 		var blobId int64
 		if err := rows.Scan(&blobHash, &blobId); err != nil {
-			return err
+			return blobsCount, err
 		}
+		if streamData.StreamBlobs == nil {
+			streamData.StreamBlobs = make(map[string]int64)
+		}
+		blobsCount++
 		streamData.StreamBlobs[blobHash] = blobId
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return blobsCount, err
 	}
-	return nil
+	return blobsCount, nil
 }

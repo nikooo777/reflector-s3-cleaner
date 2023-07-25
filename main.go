@@ -102,8 +102,9 @@ func cleaner(cmd *cobra.Command, args []string) {
 			panic(err)
 		}
 	}
+	blobsToDeleteCount := int64(0)
 	if resolveBlobs {
-		blobsToDeleteCount, err := rf.GetBlobHashesForStream(streamData)
+		blobsToDeleteCount, err = rf.GetBlobHashesForStream(streamData)
 		if err != nil {
 			panic(err)
 		}
@@ -113,7 +114,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 			logrus.Errorf("Failed to store blobs: %s", err.Error())
 		}
 	} else if loadBlobs {
-		err = localStore.LoadBlobs(streamData)
+		blobsToDeleteCount, err = localStore.LoadBlobs(streamData)
 		if err != nil {
 			logrus.Errorf("Failed to load stored blobs: %s", err.Error())
 		}
@@ -168,5 +169,8 @@ func cleaner(cmd *cobra.Command, args []string) {
 
 	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,
 		notOnChain, expired, spent, notOnChain+expired+spent, float64(notOnChain+expired+spent)/float64(len(streamData))*100)
-	logrus.Printf("%d false negatives corrected", falseNegatives)
+	logrus.Printf("%d blobs to delete for up to %.1f TB of space", blobsToDeleteCount, float64(blobsToDeleteCount)*2/1024/1024)
+	if doubleCheck {
+		logrus.Printf("%d false negatives corrected", falseNegatives)
+	}
 }
