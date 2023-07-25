@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/lbryio/lbry.go/v2/extras/errors"
+	"github.com/sirupsen/logrus"
 )
 
 type Purger struct {
@@ -19,7 +20,12 @@ type Purger struct {
 
 func Init(awsCreds configs.AWSS3Config) (*Purger, error) {
 	creds := credentials.NewStaticCredentials(awsCreds.AccessKey, awsCreds.SecretKey, "")
-	sess, err := session.NewSession(&aws.Config{Region: aws.String(awsCreds.Region), Credentials: creds})
+	sess, err := session.NewSession(&aws.Config{
+		Region:           aws.String(awsCreds.Region),
+		Credentials:      creds,
+		Endpoint:         aws.String(awsCreds.Endpoint),
+		S3ForcePathStyle: aws.Bool(true),
+	})
 	if err != nil {
 		return nil, errors.Err(err)
 	}
@@ -45,7 +51,6 @@ type DeleteResults struct {
 func (p *Purger) PurgeStreams(streams []shared.StreamData) (*DeleteResults, error) {
 	delInput := &s3.Delete{
 		Objects: []*s3.ObjectIdentifier{},
-		Quiet:   aws.Bool(true),
 	}
 
 	results := &DeleteResults{
@@ -53,7 +58,7 @@ func (p *Purger) PurgeStreams(streams []shared.StreamData) (*DeleteResults, erro
 		Successes: []string{},
 	}
 
-	for _, stream := range streams {
+	for i, stream := range streams {
 		if stream.IsValid() {
 			continue
 		}
@@ -72,6 +77,9 @@ func (p *Purger) PurgeStreams(streams []shared.StreamData) (*DeleteResults, erro
 					delInput.Objects = delInput.Objects[:0]
 				}
 			}
+		}
+		if i%10000 == 0 {
+			logrus.Infof("Pruned %d/%d streams", i, len(streams))
 		}
 	}
 

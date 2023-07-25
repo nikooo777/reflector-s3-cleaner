@@ -13,7 +13,7 @@ type Store struct {
 }
 
 func Init() (*Store, error) {
-	db, err := sql.Open("sqlite3", "./cleaner.sqlite")
+	db, err := sql.Open("sqlite3", "./cleaner.sqlite?cache=shared&_journal_mode=WAL&_synchronous=NORMAL")
 	if err != nil {
 		return nil, errors.Err(err)
 	}
@@ -221,4 +221,28 @@ func (s *Store) loadBlobsForStream(streamData *shared.StreamData) (int64, error)
 		return blobsCount, err
 	}
 	return blobsCount, nil
+}
+
+func (s *Store) FlagBlob(deletedBlobHash string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare("UPDATE blobs SET deleted = 1 WHERE blob_hash = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(deletedBlobHash)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	return nil
 }

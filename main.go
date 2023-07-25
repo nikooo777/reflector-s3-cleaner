@@ -72,7 +72,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 	if err != nil {
 		panic(err)
 	}
-	purger, err := purger.Init(configs.Configuration.S3)
+	pruner, err := purger.Init(configs.Configuration.S3)
 	if err != nil {
 		panic(err)
 	}
@@ -155,7 +155,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		validStreams++
 	}
 	if performWipe {
-		delRes, err := purger.PurgeStreams(streamData)
+		delRes, err := pruner.PurgeStreams(streamData)
 		if err != nil {
 			logrus.Fatal(err)
 		}
@@ -163,6 +163,12 @@ func cleaner(cmd *cobra.Command, args []string) {
 			logrus.Errorf("Failed to delete %d blobs", len(delRes.Failures))
 			for _, f := range delRes.Failures {
 				logrus.Errorf("Failed to delete blob %s: %s", f.Hash, f.Err.Error())
+			}
+		}
+		for _, s := range delRes.Successes {
+			err = localStore.FlagBlob(s)
+			if err != nil {
+				logrus.Errorf("Failed to flag blob %s: %s", s, err.Error())
 			}
 		}
 	}
