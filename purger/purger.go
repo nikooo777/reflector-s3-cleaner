@@ -1,7 +1,8 @@
 package purger
 
 import (
-	"reflector-s3-cleaner/shared"
+	"github.com/nikooo777/reflector-s3-cleaner/configs"
+	"github.com/nikooo777/reflector-s3-cleaner/shared"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -15,15 +16,9 @@ type Purger struct {
 	client  *s3.S3
 	bucket  string
 }
-type Credentials struct {
-	AccessKey string
-	Secret    string
-	Region    string
-	Bucket    string
-}
 
-func Init(awsCreds Credentials) (*Purger, error) {
-	creds := credentials.NewStaticCredentials(awsCreds.AccessKey, awsCreds.Secret, "")
+func Init(awsCreds configs.AWSS3Config) (*Purger, error) {
+	creds := credentials.NewStaticCredentials(awsCreds.AccessKey, awsCreds.SecretKey, "")
 	sess, err := session.NewSession(&aws.Config{Region: aws.String(awsCreds.Region), Credentials: creds})
 	if err != nil {
 		return nil, errors.Err(err)
@@ -40,56 +35,73 @@ func Init(awsCreds Credentials) (*Purger, error) {
 
 type FailedDeletes struct {
 	Hash string
-	err  error
+	Err  error
 }
 type DeleteResults struct {
 	Failures  []FailedDeletes
 	Successes []string
 }
 
-func (p *Purger) DeleteStream(streamBlobs shared.StreamBlobs) (*DeleteResults, error) {
-	objectsToDelete := make([]*s3.ObjectIdentifier, 0, 1000)
-	batches := 0
-	for i, hash := range streamBlobs.BlobHashes {
-		if i%999 == 0 {
-			batches++
-		}
-		objectsToDelete = append(objectsToDelete, &s3.ObjectIdentifier{
-			Key: aws.String(hash),
-		})
+func (p *Purger) PurgeStreams(streams []shared.StreamData) (*DeleteResults, error) {
+	delInput := &s3.Delete{
+		Objects: []*s3.ObjectIdentifier{},
+		Quiet:   aws.Bool(true),
 	}
 
-	failedDeletes := make([]FailedDeletes, 0, 100)
-	confirmedDeletes := make([]string, 0, 100)
-	for i := 0; i < batches; i++ {
-		lowerIndex := i * 1000
-		upperIndex := (i + 1) * 1000
-		if len(objectsToDelete)-1 < upperIndex {
-			upperIndex = len(objectsToDelete)
+	results := &DeleteResults{
+		Failures:  []FailedDeletes{},
+		Successes: []string{},
+	}
+
+	for _, stream := range streams {
+		if stream.IsValid() {
+			continue
 		}
-		input := &s3.DeleteObjectsInput{
-			Bucket: aws.String(p.bucket),
-			Delete: &s3.Delete{
-				Objects: objectsToDelete[lowerIndex:upperIndex],
-				Quiet:   aws.Bool(false),
-			},
-		}
-		res, err := p.client.DeleteObjects(input)
-		if err != nil {
-			return nil, errors.Err(err)
-		}
-		for _, err := range res.Errors {
-			failedDeletes = append(failedDeletes, FailedDeletes{
-				Hash: *err.Key,
-				err:  errors.Prefix(*err.Code, errors.Err(err.Message)),
-			})
-		}
-		for _, o := range res.Deleted {
-			confirmedDeletes = append(confirmedDeletes, *o.Key)
+		if stream.Spent {
+			for blobHash, _ := range stream.StreamBlobs {
+				delInput.Objects = append(delInput.Objects, &s3.ObjectIdentifier{Key: aws.String(blobHash)})
+
+				if len(delInput.Objects) == 1000 {
+					deletedKeys, err := p.deleteObjects(delInput)
+					if err != nil {
+						results.Failures = append(results.Failures, FailedDeletes{Hash: stream.SdHash, Err: err})
+						continue
+					}
+					results.Successes = append(results.Successes, deletedKeys...)
+					// clear the delete list for the next batch
+					delInput.Objects = delInput.Objects[:0]
+				}
+			}
 		}
 	}
-	return &DeleteResults{
-		Failures:  failedDeletes,
-		Successes: confirmedDeletes,
-	}, nil
+
+	// delete remaining objects
+	if len(delInput.Objects) > 0 {
+		deletedKeys, err := p.deleteObjects(delInput)
+		if err != nil {
+			return nil, err
+		}
+		results.Successes = append(results.Successes, deletedKeys...)
+	}
+
+	return results, nil
+}
+
+func (p *Purger) deleteObjects(delInput *s3.Delete) ([]string, error) {
+	input := &s3.DeleteObjectsInput{
+		Bucket: aws.String(p.bucket),
+		Delete: delInput,
+	}
+
+	resp, err := p.client.DeleteObjects(input)
+	if err != nil {
+		return nil, err
+	}
+
+	var deletedKeys []string
+	for _, deleted := range resp.Deleted {
+		deletedKeys = append(deletedKeys, *deleted.Key)
+	}
+
+	return deletedKeys, nil
 }

@@ -182,3 +182,36 @@ func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
 
 	return nil
 }
+
+func (s *Store) LoadBlobs(streamData []shared.StreamData) error {
+	for i, sd := range streamData {
+		if sd.IsValid() {
+			continue
+		}
+		err := s.loadBlobsForStream(&streamData[i])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) loadBlobsForStream(streamData *shared.StreamData) error {
+	rows, err := s.db.Query("SELECT blob_hash, blob_id FROM blobs WHERE stream_id = ?", streamData.StreamID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var blobHash string
+		var blobId int64
+		if err := rows.Scan(&blobHash, &blobId); err != nil {
+			return err
+		}
+		streamData.StreamBlobs[blobHash] = blobId
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
+}

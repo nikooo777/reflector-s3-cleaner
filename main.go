@@ -7,6 +7,7 @@ import (
 	"github.com/nikooo777/reflector-s3-cleaner/blockchain"
 	"github.com/nikooo777/reflector-s3-cleaner/chainquery"
 	"github.com/nikooo777/reflector-s3-cleaner/configs"
+	"github.com/nikooo777/reflector-s3-cleaner/purger"
 	"github.com/nikooo777/reflector-s3-cleaner/reflector"
 	"github.com/nikooo777/reflector-s3-cleaner/shared"
 	"github.com/nikooo777/reflector-s3-cleaner/sqlite_store"
@@ -22,6 +23,8 @@ var (
 	checkExpired bool
 	checkSpent   bool
 	resolveBlobs bool
+	loadBlobs    bool
+	performWipe  bool
 	limit        int64
 	doubleCheck  bool
 )
@@ -39,6 +42,8 @@ func main() {
 	cmd.Flags().BoolVar(&checkExpired, "check-expired", true, "check for streams referenced by an expired claim")
 	cmd.Flags().BoolVar(&checkSpent, "check-spent", true, "check for streams referenced by a spent claim")
 	cmd.Flags().BoolVar(&resolveBlobs, "resolve-blobs", false, "resolve the blobs for the invalid streams")
+	cmd.Flags().BoolVar(&loadBlobs, "load-blobs", false, "load the blobs for invalid streams from the database")
+	cmd.Flags().BoolVar(&performWipe, "wipe", false, "actually wipes blobs + flags streams as invalid in the database")
 	cmd.Flags().BoolVar(&doubleCheck, "double-check", false, "check against the blockchain to make sure the streams are actually invalid")
 	cmd.Flags().Int64Var(&limit, "limit", 50000000, "how many streams to check (approx)")
 
@@ -64,6 +69,10 @@ func cleaner(cmd *cobra.Command, args []string) {
 		panic(err)
 	}
 	rf, err := reflector.Init()
+	if err != nil {
+		panic(err)
+	}
+	purger, err := purger.Init(configs.Configuration.S3)
 	if err != nil {
 		panic(err)
 	}
@@ -103,6 +112,11 @@ func cleaner(cmd *cobra.Command, args []string) {
 		if err != nil {
 			logrus.Errorf("Failed to store blobs: %s", err.Error())
 		}
+	} else if loadBlobs {
+		err = localStore.LoadBlobs(streamData)
+		if err != nil {
+			logrus.Errorf("Failed to load stored blobs: %s", err.Error())
+		}
 	}
 	var validStreams, notOnChain, expired, spent, falseNegatives int64
 	claimsThatExist := make([]string, 0)
@@ -138,6 +152,18 @@ func cleaner(cmd *cobra.Command, args []string) {
 			continue
 		}
 		validStreams++
+	}
+	if performWipe {
+		delRes, err := purger.PurgeStreams(streamData)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		if len(delRes.Failures) > 0 {
+			logrus.Errorf("Failed to delete %d blobs", len(delRes.Failures))
+			for _, f := range delRes.Failures {
+				logrus.Errorf("Failed to delete blob %s: %s", f.Hash, f.Err.Error())
+			}
+		}
 	}
 
 	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,

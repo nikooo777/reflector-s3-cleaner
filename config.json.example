@@ -10,5 +10,12 @@
     "user": "lbry",
     "database": "reflector_blobs",
     "password": "password"
+  },
+  "s3": {
+    "access_key": "ACCESS_KEY",
+    "secret_key": "SECRET_KEY",
+    "bucket": "BUCKET_NAME",
+    "region": "us-east-1",
+    "endpoint": "https://s3.amazonaws.com"
   }
 }

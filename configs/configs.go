@@ -11,9 +11,17 @@ type DbConfig struct {
 	Database string `json:"database"`
 	Password string `json:"password"`
 }
+type AWSS3Config struct {
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+	Bucket    string `json:"bucket"`
+	Region    string `json:"region"`
+	Endpoint  string `json:"endpoint"`
+}
 type Configs struct {
-	Chainquery DbConfig `json:"chainquery"`
-	Reflector  DbConfig `json:"reflector"`
+	Chainquery DbConfig    `json:"chainquery"`
+	Reflector  DbConfig    `json:"reflector"`
+	S3         AWSS3Config `json:"s3"`
 }
 
 var Configuration *Configs
