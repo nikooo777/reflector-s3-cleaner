@@ -149,6 +149,10 @@ func cleaner(cmd *cobra.Command, args []string) {
 				if exists {
 					falseNegatives++
 					claimsThatExist = append(claimsThatExist, *sd.ClaimID)
+					streamData[i].Exists = true
+					streamData[i].Expired = false
+					streamData[i].Spent = false
+					streamData[i].Resolved = true
 					logrus.Errorf("claim actually exists: %s", *sd.ClaimID)
 					err = localStore.UnflagStream(&sd)
 					if err != nil {
