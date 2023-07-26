@@ -62,7 +62,7 @@ func (p *Purger) PurgeStreams(streams []shared.StreamData) (*DeleteResults, erro
 		if stream.IsValid() {
 			continue
 		}
-		if stream.Spent {
+		if stream.Spent || !stream.Exists {
 			for blobHash, _ := range stream.StreamBlobs {
 				delInput.Objects = append(delInput.Objects, &s3.ObjectIdentifier{Key: aws.String(blobHash)})
 
