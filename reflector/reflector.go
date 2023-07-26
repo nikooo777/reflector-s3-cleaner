@@ -102,7 +102,7 @@ func (c *ReflectorApi) GetStreams(limit int64) ([]shared.StreamData, error) {
 			if end > mostRecentStreamID {
 				end = mostRecentStreamID
 			}
-			logrus.Infof("adding job for %d to %d", i, end)
+			logrus.Debugf("adding job for %d to %d", i, end)
 			jobs <- offsets{start: i, end: end}
 		}
 	}()
@@ -112,7 +112,7 @@ func (c *ReflectorApi) GetStreams(limit int64) ([]shared.StreamData, error) {
 		go func() {
 			defer consumerWg.Done()
 			for job := range jobs {
-				logrus.Infof("processing job for %d to %d", job.start, job.end)
+				logrus.Infof("getting stream data for ids between %d and %d", job.start, job.end)
 				sd, err := c.getStreamDataV2(job.start, job.end)
 				if err != nil {
 					logrus.Fatal(err)
@@ -153,34 +153,6 @@ func (c *ReflectorApi) getStreamDataV2(start int64, end int64) ([]shared.StreamD
 		})
 	}
 	return streamData, nil
-}
-
-// getStreams returns a slice of StreamData containing all necessary stream information and an offset for the subsequent call which should be passed in as offset
-func (c *ReflectorApi) getStreamData(limit int64, offset int64) ([]shared.StreamData, int64, error) {
-	upperLimit := offset + batchSize
-	rows, err := c.dbConn.Query(`SELECT s.id , b.hash FROM stream s INNER JOIN blob_ b on s.sd_blob_id = b.id WHERE s.id > ? and s.id < ? order by s.id limit ?`, offset, upperLimit, limit)
-	if err != nil {
-		return nil, offset, errors.Err(err)
-	}
-	defer shared.CloseRows(rows)
-	streamData := make([]shared.StreamData, 0, batchSize)
-	newOffset := offset
-	for rows.Next() {
-		var streamID int64
-		var sdHash string
-		err = rows.Scan(&streamID, &sdHash)
-		if err != nil {
-			return nil, 0, errors.Err(err)
-		}
-		streamData = append(streamData, shared.StreamData{
-			SdHash:   sdHash,
-			StreamID: streamID,
-		})
-		if streamID > newOffset {
-			newOffset = streamID
-		}
-	}
-	return streamData, newOffset, nil
 }
 
 // getMostRecentStreamID returns the most recent stream ID
@@ -238,7 +210,7 @@ func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) (int6
 					logrus.Fatal(err)
 				}
 				if blobs != nil {
-					logrus.Printf("found %d blobs for stream %s (%d total)", len(blobs), stream.SdHash, atomic.LoadInt64(&blobsCount))
+					logrus.Debugf("found %d blobs for stream %s (%d total)", len(blobs), stream.SdHash, atomic.LoadInt64(&blobsCount))
 					streamsToBlobsMap.Store(stream.StreamID, blobs)
 					atomic.AddInt64(&blobsCount, int64(len(blobs)))
 				}
@@ -247,7 +219,7 @@ func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) (int6
 	}
 	for i, stream := range streams {
 		if i%100 == 0 {
-			logrus.Printf("queued %d/%d streams for blob hash retrieval", i, len(streams))
+			logrus.Infof("queued %d/%d streams for blob hash retrieval", i, len(streams))
 		}
 		if stream.Resolved && !stream.IsValid() {
 			streamsChan <- stream

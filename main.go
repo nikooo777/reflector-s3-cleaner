@@ -27,6 +27,7 @@ var (
 	performWipe  bool
 	limit        int64
 	doubleCheck  bool
+	debug        bool
 )
 
 func main() {
@@ -45,6 +46,7 @@ func main() {
 	cmd.Flags().BoolVar(&loadBlobs, "load-blobs", false, "load the blobs for invalid streams from the database")
 	cmd.Flags().BoolVar(&performWipe, "wipe", false, "actually wipes blobs + flags streams as invalid in the database")
 	cmd.Flags().BoolVar(&doubleCheck, "double-check", false, "check against the blockchain to make sure the streams are actually invalid")
+	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "enable debug logging")
 	cmd.Flags().Int64Var(&limit, "limit", 50000000, "how many streams to check (approx)")
 
 	if err := cmd.Execute(); err != nil {
@@ -54,6 +56,10 @@ func main() {
 }
 
 func cleaner(cmd *cobra.Command, args []string) {
+	logrus.SetLevel(logrus.InfoLevel)
+	if debug {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 	localStore, err := sqlite_store.Init()
 	if err != nil {
 		logrus.Fatal(err)
@@ -104,6 +110,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 	}
 	blobsToDeleteCount := int64(0)
 	if resolveBlobs {
+		logrus.Debugln("resolving blobs")
 		blobsToDeleteCount, err = rf.GetBlobHashesForStream(streamData)
 		if err != nil {
 			panic(err)
@@ -155,6 +162,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		validStreams++
 	}
 	if performWipe {
+		logrus.Debugln("performing wipe")
 		delRes, err := pruner.PurgeStreams(streamData)
 		if err != nil {
 			logrus.Fatal(err)

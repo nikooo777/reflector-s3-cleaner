@@ -3,9 +3,11 @@ package sqlite_store
 import (
 	"database/sql"
 
+	"github.com/nikooo777/reflector-s3-cleaner/shared"
+
 	"github.com/lbryio/lbry.go/v2/extras/errors"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/nikooo777/reflector-s3-cleaner/shared"
+	"github.com/sirupsen/logrus"
 )
 
 type Store struct {
@@ -38,6 +40,11 @@ func Init() (*Store, error) {
     deleted tinyint(1) NOT NULL,
     FOREIGN KEY (stream_id) REFERENCES streams(stream_id)
 	)`)
+	if err != nil {
+		return nil, errors.Err(err)
+	}
+	// create index for blobs table
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS blobs_stream_id_index on blobs (stream_id)`)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
@@ -124,6 +131,7 @@ func (s *Store) UnflagStream(streamData *shared.StreamData) error {
 }
 
 func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
+	logrus.Debugln("loading stream data from database")
 	// Query the database
 	rows, err := s.db.Query("SELECT sd_hash, stream_id, exists_in_blockchain, expired, spent, resolved, claim_id FROM streams")
 	if err != nil {
@@ -142,6 +150,7 @@ func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
 		}
 		streamData = append(streamData, sd)
 	}
+	logrus.Debugf("loaded %d streams", len(streamData))
 
 	// Check for errors from iterating over rows.
 	if err := rows.Err(); err != nil {
@@ -152,6 +161,7 @@ func (s *Store) LoadStreamData() ([]shared.StreamData, error) {
 }
 
 func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
+	logrus.Debugln("storing blobs in database")
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -163,7 +173,10 @@ func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
 	}
 	defer stmt.Close()
 
-	for _, sd := range streamData {
+	for i, sd := range streamData {
+		if i%100000 == 0 {
+			logrus.Debugf("stored blobs for %d/%d streams", i, len(streamData))
+		}
 		if sd.StreamBlobs == nil {
 			continue
 		}
@@ -184,8 +197,12 @@ func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
 }
 
 func (s *Store) LoadBlobs(streamData []shared.StreamData) (int64, error) {
+	logrus.Debugln("loading blobs from database")
 	totalBlobsCount := int64(0)
 	for i, sd := range streamData {
+		if i%10000 == 0 {
+			logrus.Debugf("loaded %d blobs for %d/%d streams", totalBlobsCount, i, len(streamData))
+		}
 		if sd.IsValid() {
 			continue
 		}

@@ -92,6 +92,7 @@ func (p *Purger) PurgeStreams(streams []shared.StreamData) (*DeleteResults, erro
 		results.Successes = append(results.Successes, deletedKeys...)
 	}
 
+	logrus.Debugf("%d blobs deleted and %d failures", len(results.Successes), len(results.Failures))
 	return results, nil
 }
 
