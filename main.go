@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
+	"sync"
+	"time"
 
 	"github.com/nikooo777/reflector-s3-cleaner/blockchain"
 	"github.com/nikooo777/reflector-s3-cleaner/chainquery"
@@ -165,24 +168,63 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 		validStreams++
 	}
+
 	if performWipe {
 		logrus.Debugln("performing wipe")
-		delRes, err := pruner.PurgeStreams(streamData)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		if len(delRes.Failures) > 0 {
-			logrus.Errorf("Failed to delete %d blobs", len(delRes.Failures))
-			for _, f := range delRes.Failures {
-				logrus.Errorf("Failed to delete blob %s: %s", f.Hash, f.Err.Error())
+
+		// Create channels for successes and failures
+		successes := make(chan string, 10000)        // Buffer size can be tuned according to your needs
+		failures := make(chan purger.Failure, 10000) // Buffer size can be tuned according to your needs
+
+		// Create channel for StreamData and start a goroutine to send all StreamData onto the channel
+		streamDataChan := make(chan shared.StreamData, 64)
+		go func() {
+			for i, sd := range streamData {
+				if i%5000 == 0 {
+					logrus.Infof("Queued %d/%d streams for pruning", i, len(streamData))
+				}
+				time.Sleep(10 * time.Millisecond)
+				streamDataChan <- sd
 			}
+			close(streamDataChan)
+		}()
+
+		var wg sync.WaitGroup
+		maxThreads := runtime.NumCPU() * 4
+		wg.Add(maxThreads)
+
+		// Start the PurgeStreamsV2 function in separate goroutines
+		for i := 0; i < maxThreads; i++ {
+			go pruner.PurgeStreams(streamDataChan, successes, failures, &wg)
 		}
-		for _, s := range delRes.Successes {
-			err = localStore.FlagBlob(s)
-			if err != nil {
-				logrus.Errorf("Failed to flag blob %s: %s", s, err.Error())
+
+		// Start another goroutine to process the results
+		go func() {
+			for {
+				select {
+				case s, ok := <-successes:
+					if ok {
+						// Handle successful deletion
+						err = localStore.FlagBlob(s)
+						if err != nil {
+							logrus.Errorf("Failed to flag blob %s: %s", s, err.Error())
+						}
+					}
+				case f, ok := <-failures:
+					if ok {
+						// Handle failed deletion
+						logrus.Errorf("Failed to delete blob %s: %s", f.Hashes, f.Err.Error())
+					}
+				}
 			}
-		}
+		}()
+
+		// Wait for the PurgeStreamsV2 function to finish
+		wg.Wait()
+
+		// After waiting, close the channels
+		close(successes)
+		close(failures)
 	}
 
 	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,
