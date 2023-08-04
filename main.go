@@ -1,11 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/nikooo777/reflector-s3-cleaner/blockchain"
 	"github.com/nikooo777/reflector-s3-cleaner/chainquery"
@@ -173,48 +174,61 @@ func cleaner(cmd *cobra.Command, args []string) {
 		logrus.Debugln("performing wipe")
 
 		// Create channels for successes and failures
-		successes := make(chan string, 10000)        // Buffer size can be tuned according to your needs
-		failures := make(chan purger.Failure, 10000) // Buffer size can be tuned according to your needs
+		successes := make(chan string, 10000)
+		failures := make(chan purger.Failure, 10000)
 
 		// Create channel for StreamData and start a goroutine to send all StreamData onto the channel
 		streamDataChan := make(chan shared.StreamData, 64)
-		go func() {
-			for i, sd := range streamData {
-				if i%5000 == 0 {
-					logrus.Infof("Queued %d/%d streams for pruning", i, len(streamData))
-				}
-				time.Sleep(10 * time.Millisecond)
-				streamDataChan <- sd
-			}
-			close(streamDataChan)
-		}()
 
 		var wg sync.WaitGroup
 		maxThreads := runtime.NumCPU() * 4
 		wg.Add(maxThreads)
 
-		// Start the PurgeStreamsV2 function in separate goroutines
+		// Create a channel to listen for the interrupt signal (Ctrl+C).
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, os.Interrupt)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer close(streamDataChan)
+			for i, sd := range streamData {
+				if i%5000 == 0 {
+					logrus.Infof("Queued %d/%d streams for pruning", i, len(streamData))
+				}
+				select {
+				case streamDataChan <- sd:
+				case <-interrupt:
+					return
+				}
+			}
+		}()
+
+		// Start the PurgeStreams function in separate goroutines
 		for i := 0; i < maxThreads; i++ {
 			go pruner.PurgeStreams(streamDataChan, successes, failures, &wg)
 		}
 
 		// Start another goroutine to process the results
+		resultsWg := sync.WaitGroup{}
+		resultsWg.Add(1)
 		go func() {
-			for {
-				select {
-				case s, ok := <-successes:
-					if ok {
-						// Handle successful deletion
-						err = localStore.FlagBlob(s)
-						if err != nil {
-							logrus.Errorf("Failed to flag blob %s: %s", s, err.Error())
-						}
-					}
-				case f, ok := <-failures:
-					if ok {
-						// Handle failed deletion
-						logrus.Errorf("Failed to delete blob %s: %s", f.Hashes, f.Err.Error())
-					}
+			defer resultsWg.Done()
+			for s := range successes {
+				err = localStore.FlagBlob(s)
+				if err != nil {
+					logrus.Errorf("Failed to flag blob %s: %s", s, err.Error())
+				}
+			}
+		}()
+		resultsWg.Add(1)
+		go func() {
+			defer resultsWg.Done()
+			for f := range failures {
+				//json pretty print
+				prettier, err := json.Marshal(f.Hashes)
+				if err == nil {
+					logrus.Errorf("Failed to delete blobs %s: %s", string(prettier), f.Err.Error())
 				}
 			}
 		}()
@@ -225,6 +239,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 		// After waiting, close the channels
 		close(successes)
 		close(failures)
+		resultsWg.Wait()
 	}
 
 	logrus.Printf("%d existing and %d not on the blockchain. %d expired, %d spent for a total of %d invalid streams (%.2f%% of the total)", validStreams,
