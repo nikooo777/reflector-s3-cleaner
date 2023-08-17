@@ -217,7 +217,7 @@ func (s *Store) LoadBlobs(streamData []shared.StreamData) (int64, error) {
 
 func (s *Store) loadBlobsForStream(streamData *shared.StreamData) (int64, error) {
 	blobsCount := int64(0)
-	rows, err := s.db.Query("SELECT blob_hash, blob_id FROM blobs WHERE stream_id = ?", streamData.StreamID)
+	rows, err := s.db.Query("SELECT blob_hash, blob_id, deleted FROM blobs WHERE stream_id = ?", streamData.StreamID)
 	if err != nil {
 		return blobsCount, err
 	}
@@ -225,14 +225,18 @@ func (s *Store) loadBlobsForStream(streamData *shared.StreamData) (int64, error)
 	for rows.Next() {
 		var blobHash string
 		var blobId int64
-		if err := rows.Scan(&blobHash, &blobId); err != nil {
+		var deleted bool
+		if err := rows.Scan(&blobHash, &blobId, &deleted); err != nil {
 			return blobsCount, err
 		}
 		if streamData.StreamBlobs == nil {
-			streamData.StreamBlobs = make(map[string]int64)
+			streamData.StreamBlobs = make(map[string]shared.BlobInfo)
 		}
 		blobsCount++
-		streamData.StreamBlobs[blobHash] = blobId
+		streamData.StreamBlobs[blobHash] = shared.BlobInfo{
+			BlobID:  blobId,
+			Deleted: deleted,
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return blobsCount, err

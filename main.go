@@ -21,17 +21,18 @@ import (
 )
 
 var (
-	loadData     bool
-	resolveData  bool
-	saveData     bool
-	checkExpired bool
-	checkSpent   bool
-	resolveBlobs bool
-	loadBlobs    bool
-	performWipe  bool
-	limit        int64
-	doubleCheck  bool
-	debug        bool
+	loadData       bool
+	resolveData    bool
+	saveData       bool
+	checkExpired   bool
+	checkSpent     bool
+	resolveBlobs   bool
+	loadBlobs      bool
+	performWipe    bool
+	limit          int64
+	doubleCheck    bool
+	debug          bool
+	cleanReflector bool
 )
 
 func main() {
@@ -51,6 +52,7 @@ func main() {
 	cmd.Flags().BoolVar(&performWipe, "wipe", false, "actually wipes blobs + flags streams as invalid in the database")
 	cmd.Flags().BoolVar(&doubleCheck, "double-check", false, "check against the blockchain to make sure the streams are actually invalid")
 	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "enable debug logging")
+	cmd.Flags().BoolVar(&cleanReflector, "cleanse", false, "remove all pruned blobs, sd_blobs, streams from the reflector_storage database")
 	cmd.Flags().Int64Var(&limit, "limit", 50000000, "how many streams to check (approx)")
 
 	if err := cmd.Execute(); err != nil {
@@ -112,6 +114,7 @@ func cleaner(cmd *cobra.Command, args []string) {
 			panic(err)
 		}
 	}
+
 	blobsToDeleteCount := int64(0)
 	if resolveBlobs {
 		logrus.Debugln("resolving blobs")
@@ -169,7 +172,20 @@ func cleaner(cmd *cobra.Command, args []string) {
 		}
 		validStreams++
 	}
-
+	if cleanReflector {
+		for i, sd := range streamData {
+			if i%5000 == 0 {
+				logrus.Infof("pruned %d/%d streams from reflector_data", i, len(streamData))
+			}
+			if sd.Spent || !sd.Exists {
+				err := rf.DeleteStreamBlobs(streamData[i])
+				if err != nil {
+					logrus.Error(err)
+				}
+			}
+		}
+		return
+	}
 	if performWipe {
 		logrus.Debugln("performing wipe")
 

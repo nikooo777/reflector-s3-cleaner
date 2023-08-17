@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -166,13 +167,13 @@ func (c *ReflectorApi) getMostRecentStreamID() (int64, error) {
 }
 
 // getBlobHashesForStream returns an object containing the blob hashes and ids for a given stream
-func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (map[string]int64, error) {
+func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (map[string]shared.BlobInfo, error) {
 	rows, err := c.dbConn.Query(`SELECT b.id, b.hash FROM blob_ b inner join stream_blob sb on b.id = sb.blob_id where sb.stream_id = ?`, streamId)
 	if err != nil {
 		return nil, errors.Err(err)
 	}
 	defer shared.CloseRows(rows)
-	streamBlobs := make(map[string]int64)
+	streamBlobs := make(map[string]shared.BlobInfo)
 	blobsFound := 0
 	for rows.Next() {
 		var id int64
@@ -181,7 +182,10 @@ func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (map[string]int64,
 		if err != nil {
 			return nil, errors.Err(err)
 		}
-		streamBlobs[hash] = id
+		streamBlobs[hash] = shared.BlobInfo{
+			BlobID:  id,
+			Deleted: false,
+		}
 		blobsFound++
 	}
 	err = rows.Err()
@@ -192,6 +196,58 @@ func (c *ReflectorApi) getBlobHashesForStream(streamId int64) (map[string]int64,
 		return nil, nil
 	}
 	return streamBlobs, nil
+}
+
+// DeleteStreamBlobs deletes blobs for a list of streams (granted that they're marked as deleted in memory)
+// After deleting the blobs, stream_blob entries should have been deleted as well (on delete cascade)
+// this allows for the deletion of the entry in `stream` which has to happen right before deleting the sd_blob
+func (c *ReflectorApi) DeleteStreamBlobs(stream shared.StreamData) error {
+	if stream.IsValid() {
+		return errors.Err("stream is valid and should not be deleted!")
+	}
+
+	blobsToDelete := make([]interface{}, 0, len(stream.StreamBlobs))
+	for sb, blobInfo := range stream.StreamBlobs {
+		if !blobInfo.Deleted {
+			logrus.Warnf("blob %s is not marked as deleted for stream %s (sd_hash), skipping!", sb, stream.SdHash)
+			return nil
+		}
+		blobsToDelete = append(blobsToDelete, blobInfo.BlobID)
+	}
+
+	// delete blobs in a transaction
+	tx, err := c.dbConn.Begin()
+	if err != nil {
+		return errors.Err(err)
+	}
+
+	// Construct and execute the DELETE query for blobs
+	q := "DELETE FROM blob_ WHERE id IN (?" + strings.Repeat(",?", len(blobsToDelete)-1) + ")"
+	_, err = tx.Exec(q, blobsToDelete...)
+	if err != nil {
+		_ = tx.Rollback() // Rollback transaction in case of error
+		return errors.Err(err)
+	}
+
+	// Execute the DELETE query for associated stream_blob entries
+	_, err = tx.Exec("DELETE FROM stream WHERE id = ?", stream.StreamID)
+	if err != nil {
+		_ = tx.Rollback() // Rollback transaction in case of error
+		return errors.Err(err)
+	}
+
+	// Execute the DELETE query for sd_blob
+	_, err = tx.Exec("DELETE FROM blob_ WHERE hash = ?", stream.SdHash)
+	if err != nil {
+		_ = tx.Rollback() // Rollback transaction in case of error
+		return errors.Err(err)
+	}
+
+	err = tx.Commit() // Commit the transaction
+	if err != nil {
+		return errors.Err(err)
+	}
+	return nil
 }
 
 // GetBlobHashesForStream takes a slice of streams, feeds it into a channel, schedules workers to get the blob hashes for each stream, and returns a slice of StreamBlobs
@@ -231,7 +287,7 @@ func (c *ReflectorApi) GetBlobHashesForStream(streams []shared.StreamData) (int6
 	for i, stream := range streams {
 		val, found := streamsToBlobsMap.LoadAndDelete(stream.StreamID)
 		if found {
-			streams[i].StreamBlobs = val.(map[string]int64)
+			streams[i].StreamBlobs = val.(map[string]shared.BlobInfo)
 		}
 	}
 	return blobsCount, nil
