@@ -222,11 +222,13 @@ func (c *ReflectorApi) DeleteStreamBlobs(stream shared.StreamData) error {
 	}
 
 	// Construct and execute the DELETE query for blobs
-	q := "DELETE FROM blob_ WHERE id IN (?" + strings.Repeat(",?", len(blobsToDelete)-1) + ")"
-	_, err = tx.Exec(q, blobsToDelete...)
-	if err != nil {
-		_ = tx.Rollback() // Rollback transaction in case of error
-		return errors.Err(err)
+	if len(blobsToDelete) > 0 {
+		q := "DELETE FROM blob_ WHERE id IN (?" + strings.Repeat(",?", len(blobsToDelete)-1) + ")"
+		_, err = tx.Exec(q, blobsToDelete...)
+		if err != nil {
+			_ = tx.Rollback() // Rollback transaction in case of error
+			return errors.Err(err)
+		}
 	}
 
 	// Execute the DELETE query for associated stream_blob entries

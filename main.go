@@ -173,16 +173,47 @@ func cleaner(cmd *cobra.Command, args []string) {
 		validStreams++
 	}
 	if cleanReflector {
+		numCPUs := runtime.NumCPU()
+		var wg sync.WaitGroup
+
+		// Channels
+		tasks := make(chan shared.StreamData, numCPUs)
+		var errMutex sync.Mutex
+		var errors []error
+
+		// Start workers
+		for w := 0; w < numCPUs; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for sd := range tasks {
+					err := rf.DeleteStreamBlobs(sd)
+					if err != nil {
+						errMutex.Lock()
+						errors = append(errors, err)
+						errMutex.Unlock()
+					}
+				}
+			}()
+		}
+
+		// Feed tasks to the workers
 		for i, sd := range streamData {
 			if i%5000 == 0 {
 				logrus.Infof("pruned %d/%d streams from reflector_data", i, len(streamData))
 			}
 			if sd.Spent || !sd.Exists {
-				err := rf.DeleteStreamBlobs(streamData[i])
-				if err != nil {
-					logrus.Error(err)
-				}
+				tasks <- sd
 			}
+		}
+		close(tasks) // Closing tasks channel to signal workers that no more tasks are coming
+
+		// Wait for all workers to finish
+		wg.Wait()
+
+		// Log all errors
+		for _, err := range errors {
+			logrus.Error(err)
 		}
 		return
 	}
