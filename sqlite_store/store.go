@@ -180,8 +180,8 @@ func (s *Store) StoreBlobs(streamData []shared.StreamData) error {
 		if sd.StreamBlobs == nil {
 			continue
 		}
-		for blobHash, blobId := range sd.StreamBlobs {
-			_, err = stmt.Exec(sd.StreamID, blobHash, false, blobId)
+		for blobHash, blobInfo := range sd.StreamBlobs {
+			_, err = stmt.Exec(sd.StreamID, blobHash, false, blobInfo.BlobID)
 			if err != nil {
 				return err
 			}
