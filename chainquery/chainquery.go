@@ -215,12 +215,14 @@ func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes, claimID
 		return errors.Err(err)
 	}
 	defer shared.CloseRows(rows)
+
+	visitedSdHashes := make(map[string][]int, len(sdHashes))
 	for rows.Next() {
-		var h string
+		var sdHash string
 		var bidState string
 		var claimID string
 
-		err = rows.Scan(&h, &bidState, &claimID)
+		err = rows.Scan(&sdHash, &bidState, &claimID)
 		if err != nil {
 			return errors.Err(err)
 		}
@@ -231,8 +233,22 @@ func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes, claimID
 		if checkSpent && bidState == "Spent" {
 			newState = Spent
 		}
-		existingHashes.Store(h, newState)
-		claimIDs.Store(h, claimID)
+		otherClaims, ok := visitedSdHashes[sdHash]
+		if !ok {
+			otherClaims = make([]int, 0, 1)
+		}
+		visitedSdHashes[sdHash] = append(otherClaims, newState)
+		if ok {
+			// multiple claims could be using the same sd_hash which means that if even just one claim still exists, then the sd_hash and the related blobs should be preserved
+			for _, state := range otherClaims {
+				if state == Exists && newState != Exists {
+					newState = state
+					break
+				}
+			}
+		}
+		existingHashes.Store(sdHash, newState)
+		claimIDs.Store(sdHash, claimID)
 	}
 	return nil
 }
