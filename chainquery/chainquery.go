@@ -243,6 +243,7 @@ func (c *CQApi) claimsExist(streams []shared.StreamData, existingHashes, claimID
 			for _, state := range otherClaims {
 				if state == Exists && newState != Exists {
 					newState = state
+					logrus.Debugf("sd_hash %s has multiple claims, but at least one is still valid", sdHash)
 					break
 				}
 			}
